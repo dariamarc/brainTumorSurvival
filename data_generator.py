@@ -106,10 +106,18 @@ class MRIDataGenerator(Sequence):
                 full_volume_image = np.zeros_like(full_volume_image,
                                                   dtype=np.float32)  # Or handle as appropriate if image is uniform
 
-            # Mask one-hot encoding (assuming 3 classes: 0, 1, 2 based on your previous logic)
-            # Original: mask[seg == 4] = 1, mask[seg == 2] = 2. Assuming 0 is background.
-            # So, classes are 0, 1, 2 for a total of 3 classes.
+            # FIX: Proper one-hot encoding for 3D masks
+            # Ensure mask values are integers and in correct range [0, 1, 2]
+            full_volume_mask = full_volume_mask.astype(np.int32)
+
+            # Debug: Print mask info to understand the data
+            print(f"Mask shape before one-hot: {full_volume_mask.shape}")
+            print(f"Unique mask values: {np.unique(full_volume_mask)}")
+
+            # Apply one-hot encoding: (D, H, W) -> (D, H, W, 3)
             mask_one_hot = tf.keras.utils.to_categorical(full_volume_mask, num_classes=3)
+
+            print(f"Mask shape after one-hot: {mask_one_hot.shape}")
 
             batch_images.append(full_volume_image)
             batch_masks.append(mask_one_hot)
@@ -120,10 +128,7 @@ class MRIDataGenerator(Sequence):
         batch_images_arr = np.array(batch_images, dtype=np.float32)
         batch_masks_arr = np.array(batch_masks, dtype=np.float32)  # ensure mask is float for Keras loss
 
-        # No transpose needed here if your model expects (D, H, W, C)
-        # The `np.stack(..., axis=0)` already produces (D, H, W, C) for a single volume.
-        # When array-ing the batch_images, it becomes (B, D, H, W, C).
-        # This matches the Keras 3D Conv input convention.
+        print(f"Final batch shapes - Images: {batch_images_arr.shape}, Masks: {batch_masks_arr.shape}")
 
         return batch_images_arr, batch_masks_arr
 

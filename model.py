@@ -4,10 +4,6 @@ from tensorflow.keras import layers
 import numpy as np
 
 
-# --- Placeholder for external functions (make sure these are available in your code) ---
-# Example minimal implementations for demonstration.
-# You should use your actual implementations from your project.
-
 def features_imagenet1k_keras(model_name):
     """
     Placeholder for loading a 3D feature extractor.
@@ -39,18 +35,9 @@ def features_imagenet1k_keras(model_name):
         raise ValueError(f"Unknown feature extractor: {model_name}")
 
 
-# def init_conv_keras(layer):
-#     # Dummy function for weight initialization
-#     if hasattr(layer, 'kernel'):
-#         tf.keras.initializers.VarianceScaling(scale=2.0, mode='fan_out', distribution='truncated_normal')(layer.kernel)
-#     if hasattr(layer, 'bias') and layer.bias is not None:
-#         tf.keras.initializers.Zeros()(layer.bias)
-
-
 def init_resnet3d_features_keras(model, in_channels):
     # Dummy function for ResNet 3D feature initialization
     print(f"Initializing dummy ResNet 3D features for {in_channels} channels.")
-    pass
 
 
 # --- MProtoNet3D_Segmentation_Keras Class ---
@@ -75,21 +62,25 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
 
         while len(self.prototype_shape_tuple) < 5:
             self.prototype_shape_tuple += (1,)
+
+        # FIX: Keep prototype_shape_tuple as regular Python tuple for indexing
+        # Only create TF constant when needed for TF operations
         self.prototype_shape = tf.constant(self.prototype_shape_tuple, dtype=tf.int32)
 
         # --- ENCODER (Contracting Path) ---
         self.features_extractor_model = features_imagenet1k_keras(features)
 
-        dummy_input = tf.zeros((1,) + self.input_shape_keras, dtype=tf.float32)  # Ensure dummy_input is float32
+        dummy_input = tf.zeros((1,) + self.input_shape_keras, dtype=tf.float32)
+        # Ensure dummy_input is float32
         dummy_encoder_outputs = self.features_extractor_model(dummy_input)
 
         # --- BOTTLENECK/ADD-ONS (where prototypes might interact) ---
-        # Initialize Conv3D layers with 'he_normal' for ReLU activation, and 'zeros' for biases
+        # FIX: Use prototype_shape_tuple[1] (Python int) instead of self.prototype_shape[1] (TF tensor)
         self.add_ons = keras.Sequential([
-            layers.Conv3D(self.prototype_shape[1], 1, use_bias=True, activation='relu',
+            layers.Conv3D(self.prototype_shape_tuple[1], 1, use_bias=True, activation='relu',
                           kernel_initializer='he_normal', bias_initializer='zeros'),
             layers.BatchNormalization(),
-            layers.Conv3D(self.prototype_shape[1], 1, use_bias=True,
+            layers.Conv3D(self.prototype_shape_tuple[1], 1, use_bias=True,
                           kernel_initializer='he_normal', bias_initializer='zeros'),  # No activation here
             layers.BatchNormalization()
         ], name="add_ons_bottleneck")
@@ -113,10 +104,6 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
                                                kernel_initializer='glorot_uniform',
                                                bias_initializer='zeros')  # Common for final linear layer
 
-        # self._initialize_weights is now redundant as initializers are passed to layer constructors
-        # if init_weights:
-        #     self._initialize_weights(in_channels=in_size[-1])
-
     def _build_decoder_block(self, output_channels):
         return keras.Sequential([
             layers.Conv3DTranspose(output_channels, kernel_size=2, strides=2, padding='same',
@@ -133,17 +120,9 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
             layers.ReLU()
         ])
 
-    # This method is now redundant and can be removed
-    # def _initialize_weights(self, in_channels):
-    #     init_conv_keras(self.add_ons)
-    #     init_conv_keras(self.upsample_block1)
-    #     init_conv_keras(self.upsample_block2)
-    #     init_conv_keras(self.upsample_block3)
-    #     init_conv_keras(self.segmentation_head)
-
     def l2_convolution_3D(self, x):
         proto_filters = tf.transpose(self.prototype_vectors, perm=[2, 3, 4, 1, 0])
-        dot_product = tf.nn.conv3d(x, filters=proto_filters, strides=(1, 1, 1, 1, 1), padding='same')
+        dot_product = tf.nn.conv3d(x, filters=proto_filters, strides=(1, 1, 1, 1, 1), padding='SAME')
         x2 = tf.reduce_sum(tf.square(x), axis=-1, keepdims=True)
         p2 = tf.reduce_sum(tf.square(self.prototype_vectors), axis=[1, 2, 3, 4], keepdims=True)
         p2 = tf.transpose(p2, perm=[1, 2, 3, 4, 0])
@@ -154,7 +133,7 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
 
     def cosine_convolution_3D(self, x):
         proto_filters = tf.transpose(self.prototype_vectors, perm=[2, 3, 4, 1, 0])
-        dot_product = tf.nn.conv3d(x, filters=proto_filters, strides=(1, 1, 1, 1, 1), padding='same')
+        dot_product = tf.nn.conv3d(x, filters=proto_filters, strides=(1, 1, 1, 1, 1), padding='SAME')
         x_norm = tf.norm(x, axis=-1, keepdims=True)
         p_norm = tf.norm(self.prototype_vectors, axis=[1, 2, 3, 4], keepdims=True)
         p_norm = tf.transpose(p_norm, perm=[1, 2, 3, 4, 0])
@@ -170,6 +149,94 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
             return tf.exp(-distances)
         else:
             raise NotImplementedError
+
+    def _match_spatial_dimensions(self, tensor_to_resize, target_tensor):
+        """
+        Resize tensor_to_resize to match the spatial dimensions of target_tensor.
+        Uses cropping or padding as needed.
+        """
+        target_shape = tf.shape(target_tensor)
+        current_shape = tf.shape(tensor_to_resize)
+
+        # Extract spatial dimensions (D, H, W) - indices 1, 2, 3
+        target_d, target_h, target_w = target_shape[1], target_shape[2], target_shape[3]
+        current_d, current_h, current_w = current_shape[1], current_shape[2], current_shape[3]
+
+        # Calculate differences
+        d_diff = target_d - current_d
+        h_diff = target_h - current_h
+        w_diff = target_w - current_w
+
+        # Use tf.cond for conditional operations in graph mode
+        def pad_depth():
+            pad_before = d_diff // 2
+            pad_after = d_diff - pad_before
+            return tf.pad(tensor_to_resize,
+                          [[0, 0], [pad_before, pad_after], [0, 0], [0, 0], [0, 0]])
+
+        def crop_depth():
+            crop_before = (-d_diff) // 2
+            crop_after = crop_before + target_d
+            return tensor_to_resize[:, crop_before:crop_after, :, :, :]
+
+        def no_change_depth():
+            return tensor_to_resize
+
+        # Handle depth dimension
+        result = tf.cond(d_diff > 0, pad_depth,
+                         lambda: tf.cond(d_diff < 0, crop_depth, no_change_depth))
+
+        # For height and width, let's use a simpler approach with tf.image.resize_with_crop_or_pad
+        # But since that's for 2D, we'll implement a simpler version using slicing and padding
+
+        # Update current shape after depth adjustment
+        current_shape = tf.shape(result)
+        current_h, current_w = current_shape[2], current_shape[3]
+        h_diff = target_h - current_h
+        w_diff = target_w - current_w
+
+        def pad_height():
+            pad_before = h_diff // 2
+            pad_after = h_diff - pad_before
+            return tf.pad(result,
+                          [[0, 0], [0, 0], [pad_before, pad_after], [0, 0], [0, 0]])
+
+        def crop_height():
+            crop_before = (-h_diff) // 2
+            crop_after = crop_before + target_h
+            return result[:, :, crop_before:crop_after, :, :]
+
+        def no_change_height():
+            return result
+
+        # Handle height dimension
+        result = tf.cond(h_diff > 0, pad_height,
+                         lambda: tf.cond(h_diff < 0, crop_height, no_change_height))
+
+        # Update current shape after height adjustment
+        current_shape = tf.shape(result)
+        current_w = current_shape[3]
+        w_diff = target_w - current_w
+
+        def pad_width():
+            pad_before = w_diff // 2
+            pad_after = w_diff - pad_before
+            return tf.pad(result,
+                          [[0, 0], [0, 0], [0, 0], [pad_before, pad_after], [0, 0]])
+
+        def crop_width():
+            crop_before = (-w_diff) // 2
+            crop_after = crop_before + target_w
+            return result[:, :, :, crop_before:crop_after, :]
+
+        def no_change_width():
+            return result
+
+        # Handle width dimension
+        result = tf.cond(w_diff > 0, pad_width,
+                         lambda: tf.cond(w_diff < 0, crop_width, no_change_width))
+
+        return result
 
     def call(self, inputs, training=False):
         encoder_outputs = self.features_extractor_model(inputs, training=training)
@@ -191,10 +258,14 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         up = f_processed
 
         up = self.upsample_block1(up, training=training)
-        up = layers.concatenate([up, f_level2], axis=-1)
+        # Match spatial dimensions before concatenation
+        f_level2_matched = self._match_spatial_dimensions(f_level2, up)
+        up = layers.concatenate([up, f_level2_matched], axis=-1)
 
         up = self.upsample_block2(up, training=training)
-        up = layers.concatenate([up, f_level1], axis=-1)
+        # Match spatial dimensions before concatenation
+        f_level1_matched = self._match_spatial_dimensions(f_level1, up)
+        up = layers.concatenate([up, f_level1_matched], axis=-1)
 
         final_features = self.upsample_block3(up, training=training)
 
