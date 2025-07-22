@@ -106,27 +106,16 @@ class MRIDataGenerator(Sequence):
                 full_volume_image = np.zeros_like(full_volume_image,
                                                   dtype=np.float32)  # Or handle as appropriate if image is uniform
 
-            # FIX: Proper one-hot encoding for 3D masks
-            # Ensure mask values are integers and in correct range [0, 1, 2]
             full_volume_mask = full_volume_mask.astype(np.int32)
 
-            # Debug: Print mask info to understand the data
-            print(f"Mask shape before one-hot: {full_volume_mask.shape}")
-            print(f"Unique mask values: {np.unique(full_volume_mask)}")
-
-            # Apply one-hot encoding: (D, H, W) -> (D, H, W, 3)
-            mask_one_hot = tf.keras.utils.to_categorical(full_volume_mask, num_classes=3)
-
-            print(f"Mask shape after one-hot: {mask_one_hot.shape}")
-
             batch_images.append(full_volume_image)
-            batch_masks.append(mask_one_hot)
+            batch_masks.append(full_volume_mask)
 
         # Convert lists of volumes to NumPy arrays for the batch
         # batch_images_arr shape: (Batch_Size, D, H, W, C)
         # batch_masks_arr shape: (Batch_Size, D, H, W, Num_Classes)
         batch_images_arr = np.array(batch_images, dtype=np.float32)
-        batch_masks_arr = np.array(batch_masks, dtype=np.float32)  # ensure mask is float for Keras loss
+        batch_masks_arr = np.array(batch_masks, dtype=np.float32)
 
         print(f"Final batch shapes - Images: {batch_images_arr.shape}, Masks: {batch_masks_arr.shape}")
 
