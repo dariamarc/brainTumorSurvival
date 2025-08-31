@@ -6,25 +6,31 @@ import numpy as np
 
 def features_imagenet1k_keras(model_name):
     """
-    Modified 3D feature extractor to properly handle 155x240x240 input dimensions.
+    Placeholder for loading a 3D feature extractor.
+    In a real scenario, this would load a 3D CNN backbone (e.g., a 3D ResNet, or adapt a 2D one).
+    For this example, let's create a dummy 3D feature extractor that mimics downsampling.
     """
     if model_name == 'resnet50_ri':
+        # This is a VERY simplified dummy encoder to show how intermediate outputs might be obtained.
+        # In a real ResNet, you'd extract outputs after specific blocks.
+
         input_tensor = keras.Input(shape=(None, None, None, 4))  # (D, H, W, C_in)
 
-        # Encoder Block 1 - No pooling to preserve odd dimensions
+        # Encoder Block 1 (e.g., initial conv and pool)
         conv1 = layers.Conv3D(32, 3, activation='relu', padding='same')(input_tensor)
-        # Don't pool the depth dimension (155) to avoid odd number issues
-        pool1 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv1)  # Only pool H,W: (155, 120, 120, 32)
+        pool1 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv1)  # Downsamples by 2
 
         # Encoder Block 2
         conv2 = layers.Conv3D(64, 3, activation='relu', padding='same')(pool1)
-        pool2 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv2)  # Only pool H,W: (155, 60, 60, 64)
+        pool2 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv2)  # Downsamples by 2 (total 4x)
 
         # Encoder Block 3 (Bottleneck)
         conv3 = layers.Conv3D(128, 3, activation='relu', padding='same')(pool2)
-        pool3 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv3)  # Final: (155, 30, 30, 128)
+        # No pool here, this is the bottleneck output
 
-        return keras.Model(inputs=input_tensor, outputs=[conv1, conv2, conv3, pool3])
+        # Return a model that outputs features from different stages
+        # In a real U-Net, you'd carefully select where to get these skip connections.
+        return keras.Model(inputs=input_tensor, outputs=[conv1, conv2, conv3])
     else:
         raise ValueError(f"Unknown feature extractor: {model_name}")
 
