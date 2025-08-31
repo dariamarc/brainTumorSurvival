@@ -96,6 +96,12 @@ class MRIDataGenerator(Sequence):
             # Resulting mask shape: (D, H, W)
             full_volume_mask = np.stack(volume_mask_slices, axis=0)
 
+            # === PREPROCESSING STEP: PAD DEPTH DIMENSION ===
+            full_volume_image = self._pad_volume_depth(full_volume_image, target_depth=160)
+            full_volume_mask = self._pad_volume_depth(full_volume_mask, target_depth=160)
+
+            print(f"After padding - Image shape: {full_volume_image.shape}, Mask shape: {full_volume_mask.shape}")
+
             # Normalization (per-volume)
             image_data_min = np.min(full_volume_image)
             image_data_max = np.max(full_volume_image)
@@ -121,6 +127,42 @@ class MRIDataGenerator(Sequence):
 
         return batch_images_arr, batch_masks_arr
 
+    def _pad_volume_depth(self, volume, target_depth=160):
+        """
+        Pad volume along depth dimension from 155 to target_depth (default 160).
+
+        Args:
+            volume: numpy array of shape (155, 240, 240, C) or (155, 240, 240)
+            target_depth: target depth dimension (default 160)
+
+        Returns:
+            padded volume of shape (target_depth, 240, 240, C) or (target_depth, 240, 240)
+        """
+        current_depth = volume.shape[0]
+
+        if current_depth >= target_depth:
+            # If already at target depth or larger, just return (or crop if needed)
+            print(f"Volume depth {current_depth} >= target {target_depth}, no padding needed")
+            return volume[:target_depth]  # Crop if larger
+
+        # Calculate padding needed
+        pad_needed = target_depth - current_depth  # 160 - 155 = 5
+        pad_before = pad_needed // 2  # 2
+        pad_after = pad_needed - pad_before  # 3
+
+        print(f"Padding volume: {current_depth} -> {target_depth} (pad_before={pad_before}, pad_after={pad_after})")
+
+        # Create padding configuration
+        if len(volume.shape) == 4:  # Image volume (D, H, W, C)
+            pad_config = ((pad_before, pad_after), (0, 0), (0, 0), (0, 0))
+        else:  # Mask volume (D, H, W)
+            pad_config = ((pad_before, pad_after), (0, 0), (0, 0))
+
+        # Pad with zeros (background/black slices)
+        padded_volume = np.pad(volume, pad_config, mode='constant', constant_values=0)
+
+        print(f"Padded volume shape: {padded_volume.shape}")
+        return padded_volume
     def on_epoch_end(self):
         if self.shuffle:
             np.random.shuffle(self.indices)

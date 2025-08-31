@@ -10,12 +10,14 @@ if __name__ == "__main__":
     split_ratio = 0.2
     random_state = 42
 
-    D = 155
+    D = 160
     H = 240
     W = 240
     C = 4
 
     input_shape = (D, H, W, C)
+
+    # no of output classes: GD enhancing tumor, peritumoral edema, non-enhancing tumor core
     num_output_classes = 3
 
     train_generator = MRIDataGenerator(
@@ -39,6 +41,8 @@ if __name__ == "__main__":
         random_state=random_state
     )
 
+    # the first number has to divide with the number of output classes
+    # 21 / 3 = 7 - we will have 7 prototypes learned for each class
     prototype_shape = (21, 128, 1, 1, 1)
 
     model = MProtoNet3D_Segmentation_Keras(

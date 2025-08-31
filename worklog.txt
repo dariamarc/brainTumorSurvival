@@ -1,0 +1,2 @@
+1. The input data has size of (155, 240, 240, 4). Since 155 is not a number suitable for the U-Net architecture I have to pad the input images to an even number (160).
+Other options include resampling, but that could cause data loss, and cropping, but cropping may actually cut parts of the image that are of interest.
