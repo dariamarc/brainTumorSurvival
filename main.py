@@ -10,7 +10,7 @@ if __name__ == "__main__":
     split_ratio = 0.2
     random_state = 42
 
-    D = 160
+    D = 155
     H = 240
     W = 240
     C = 4
@@ -77,7 +77,8 @@ if __name__ == "__main__":
         epochs=epochs,
         steps_per_epoch=steps_per_epoch,
         validation_data=validation_generator,
-        validation_steps=validation_steps
+        validation_steps=validation_steps,
+        verbose=2
     )
     print("Training finished.")
 

@@ -7,30 +7,38 @@ import numpy as np
 def features_imagenet1k_keras(model_name):
     """
     Placeholder for loading a 3D feature extractor.
-    In a real scenario, this would load a 3D CNN backbone (e.g., a 3D ResNet, or adapt a 2D one).
-    For this example, let's create a dummy 3D feature extractor that mimics downsampling.
+    Creates a proper 3D encoder that matches the expected dimensions.
     """
     if model_name == 'resnet50_ri':
-        # This is a VERY simplified dummy encoder to show how intermediate outputs might be obtained.
-        # In a real ResNet, you'd extract outputs after specific blocks.
-
         input_tensor = keras.Input(shape=(None, None, None, 4))  # (D, H, W, C_in)
 
-        # Encoder Block 1 (e.g., initial conv and pool)
+        # Encoder Block 1 - keep full resolution for skip connection
         conv1 = layers.Conv3D(32, 3, activation='relu', padding='same')(input_tensor)
-        pool1 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv1)  # Downsamples by 2
+        # (160, 240, 240, 32)
+
+        # Pool to reduce spatial dimensions for conv2
+        pool1 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv1)  # (160, 120, 120, 32)
 
         # Encoder Block 2
         conv2 = layers.Conv3D(64, 3, activation='relu', padding='same')(pool1)
-        pool2 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv2)  # Downsamples by 2 (total 4x)
+        # (160, 120, 120, 64)
 
-        # Encoder Block 3 (Bottleneck)
+        # Pool to reduce spatial dimensions for conv3
+        pool2 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv2)  # (160, 60, 60, 64)
+
+        # Encoder Block 3
         conv3 = layers.Conv3D(128, 3, activation='relu', padding='same')(pool2)
-        # No pool here, this is the bottleneck output
+        # (160, 60, 60, 128)
 
-        # Return a model that outputs features from different stages
-        # In a real U-Net, you'd carefully select where to get these skip connections.
-        return keras.Model(inputs=input_tensor, outputs=[conv1, conv2, conv3])
+        # Pool to reduce spatial dimensions for bottleneck
+        pool3 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv3)  # (160, 30, 30, 128)
+
+        # Encoder Block 4 (Bottleneck)
+        conv4 = layers.Conv3D(128, 3, activation='relu', padding='same')(pool3)
+        # (160, 30, 30, 128) - this is the bottleneck
+
+        # Return 4 outputs for U-Net skip connections
+        return keras.Model(inputs=input_tensor, outputs=[conv1, conv2, conv3, conv4])
     else:
         raise ValueError(f"Unknown feature extractor: {model_name}")
 
@@ -70,6 +78,10 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         dummy_input = tf.zeros((1,) + self.input_shape_keras, dtype=tf.float32)
         dummy_encoder_outputs = self.features_extractor_model(dummy_input)
 
+        print("Encoder output shapes:")
+        for i, output in enumerate(dummy_encoder_outputs):
+            print(f"  Level {i + 1}: {output.shape}")
+
         # --- BOTTLENECK/ADD-ONS ---
         self.add_ons = keras.Sequential([
             layers.Conv3D(self.prototype_shape_tuple[1], 1, use_bias=True, activation='relu',
@@ -90,20 +102,26 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         conv2_channels = dummy_encoder_outputs[1].shape[-1]  # 64
         conv3_channels = dummy_encoder_outputs[2].shape[-1]  # 128
 
-        # Decoder blocks - designed to reach exact target dimensions
+        # Decoder blocks with correct upsampling
         self.upsample_block1 = self._build_decoder_block(conv3_channels)  # 128 channels
         self.upsample_block2 = self._build_decoder_block(conv2_channels)  # 64 channels
         self.upsample_block3 = self._build_decoder_block(conv1_channels)  # 32 channels
         self.upsample_block4 = self._build_decoder_block(16)  # 16 channels
 
-        # --- FINAL SEGMENTATION HEAD ---
+        # --- FINAL PROCESSING AND SEGMENTATION HEAD ---
+        self.final_conv = layers.Conv3D(16, kernel_size=3, padding='same', activation='relu',
+                                        name='final_processing',
+                                        kernel_initializer='he_normal', bias_initializer='zeros')
+
         self.segmentation_head = layers.Conv3D(self.num_classes, kernel_size=1, activation=None,
                                                name='segmentation_output',
                                                kernel_initializer='glorot_uniform',
                                                bias_initializer='zeros')
 
     def _build_decoder_block(self, output_channels):
+        """Build a decoder block that upsamples by 2x in spatial dimensions only"""
         return keras.Sequential([
+            # Upsample by 2x in H and W dimensions only, keep D dimension same
             layers.Conv3DTranspose(output_channels, kernel_size=(1, 2, 2), strides=(1, 2, 2), padding='same',
                                    kernel_initializer='he_normal', bias_initializer='zeros'),
             layers.BatchNormalization(),
@@ -152,13 +170,13 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         # Get encoder outputs: conv1, conv2, conv3, bottleneck
         encoder_outputs = self.features_extractor_model(inputs, training=training)
 
-        f_level1 = encoder_outputs[0]  # (B, 155, 240, 240, 32)
-        f_level2 = encoder_outputs[1]  # (B, 155, 120, 120, 64)
-        f_level3 = encoder_outputs[2]  # (B, 155, 60, 60, 128)
-        f_bottleneck = encoder_outputs[3]  # (B, 155, 30, 30, 128)
+        f_level1 = encoder_outputs[0]  # (B, 160, 240, 240, 32)
+        f_level2 = encoder_outputs[1]  # (B, 160, 120, 120, 64)
+        f_level3 = encoder_outputs[2]  # (B, 160, 60, 60, 128)
+        f_bottleneck = encoder_outputs[3]  # (B, 160, 30, 30, 128)
 
         # Process bottleneck features
-        f_processed = self.add_ons(f_bottleneck, training=training)  # (B, 155, 30, 30, 128)
+        f_processed = self.add_ons(f_bottleneck, training=training)  # (B, 160, 30, 30, 128)
 
         # Prototype learning (optional - computed but not used in decoder)
         if self.f_dist == 'l2':
@@ -170,24 +188,24 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
             raise NotImplementedError
 
         # Decoder path - progressive upsampling
-        up = f_processed  # Start: (B, 155, 30, 30, 128)
+        up = f_processed  # Start: (B, 160, 30, 30, 128)
 
         # Upsample 1: 30x30 -> 60x60
-        up = self.upsample_block1(up, training=training)  # (B, 155, 60, 60, 128)
-        up = layers.concatenate([up, f_level3], axis=-1)  # (B, 155, 60, 60, 256)
+        up = self.upsample_block1(up, training=training)  # (B, 160, 60, 60, 128)
+        up = layers.concatenate([up, f_level3], axis=-1)  # (B, 160, 60, 60, 256)
 
         # Upsample 2: 60x60 -> 120x120
-        up = self.upsample_block2(up, training=training)  # (B, 155, 120, 120, 64)
-        up = layers.concatenate([up, f_level2], axis=-1)  # (B, 155, 120, 120, 128)
+        up = self.upsample_block2(up, training=training)  # (B, 160, 120, 120, 64)
+        up = layers.concatenate([up, f_level2], axis=-1)  # (B, 160, 120, 120, 128)
 
         # Upsample 3: 120x120 -> 240x240
-        up = self.upsample_block3(up, training=training)  # (B, 155, 240, 240, 32)
-        up = layers.concatenate([up, f_level1], axis=-1)  # (B, 155, 240, 240, 64)
+        up = self.upsample_block3(up, training=training)  # (B, 160, 240, 240, 32)
+        up = layers.concatenate([up, f_level1], axis=-1)  # (B, 160, 240, 240, 64)
 
-        # Final upsample to match exactly
-        final_features = self.upsample_block4(up, training=training)  # (B, 155, 240, 240, 16)
+        # Final processing - no upsampling needed, just process features
+        final_features = self.final_conv(up, training=training)  # (B, 160, 240, 240, 16)
 
         # Segmentation head
-        segmentation_logits = self.segmentation_head(final_features, training=training)  # (B, 155, 240, 240, 3)
+        segmentation_logits = self.segmentation_head(final_features, training=training)  # (B, 160, 240, 240, 3)
 
         return segmentation_logits
