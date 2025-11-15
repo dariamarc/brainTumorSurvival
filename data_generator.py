@@ -21,14 +21,14 @@ class MRIDataGenerator(Sequence):
             raise FileNotFoundError(f"Error: Folder path does not exist: {self.folder_path}")
 
         # Instead of listing folders, identify unique volume IDs
-        # We expect volume_0_slice_0.h5 to volume_368_slice_154.h5
-        self.volume_ids = list(range(self.num_volumes))  # Simply generate expected volume IDs
+        # We expect volume_1_slice_0.h5 to volume_369_slice_154.h5
+        self.volume_ids = list(range(1, self.num_volumes + 1))  # Generate volume IDs starting from 1
 
         if not self.volume_ids:
             raise ValueError(
                 f"No volume IDs found. Expected {self.num_volumes} volumes. Please check data organization.")
 
-        print(f"MRIDataGenerator: Found {len(self.volume_ids)} unique volume IDs (0 to {self.num_volumes - 1}).")
+        print(f"MRIDataGenerator: Found {len(self.volume_ids)} unique volume IDs (1 to {self.num_volumes}).")
 
         self.train_indices, self.val_indices = self._split_data()
 
