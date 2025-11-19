@@ -5,15 +5,20 @@ from tensorflow import keras
 from model import MProtoNet3D_Segmentation_Keras
 
 if __name__ == "__main__":
-    folder_path = "archive/BraTS2020_training_data/content/data"
-    batch_size = 2  # INCREASED from 1 for better batch normalization stability
+    # ========== DATA CONFIGURATION ==========
+    # Use preprocessed data for faster training
+    folder_path = "preprocessed_data"  # Preprocessed: 160x160x96
+    # folder_path = "archive/BraTS2020_training_data/content/data"  # Original: 240x240x155
+
+    batch_size = 4  # Increased from 2 due to smaller volume size
     split_ratio = 0.2
     random_state = 42
 
-    D = 155
-    H = 240
-    W = 240
-    C = 4
+    # PREPROCESSED DATA DIMENSIONS (160x160x96)
+    D = 96   # Depth: reduced from 155
+    H = 160  # Height: reduced from 240
+    W = 160  # Width: reduced from 240
+    C = 4    # Channels: unchanged (FLAIR, T1, T1ce, T2)
 
     input_shape = (D, H, W, C)
 
@@ -129,8 +134,11 @@ if __name__ == "__main__":
     print("=" * 80)
     print("IMPROVED TRAINING CONFIGURATION")
     print("=" * 80)
+    print(f"Data path: {folder_path}")
+    print(f"Input shape: ({D}, {H}, {W}, {C})")
+    print(f"Data reduction: ~51% smaller than original (240x240x155)")
     print(f"Initial learning rate: {initial_learning_rate}")
-    print(f"Batch size: {batch_size} (increased from 1)")
+    print(f"Batch size: {batch_size} (increased from 2 due to smaller volumes)")
     print(f"Loss function: Combined Focal + Dice Loss")
     print(f"  - Focal loss gamma: 1.0 (reduced from 2.0)")
     print(f"  - Focal loss alpha: 0.25")
