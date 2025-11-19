@@ -6,15 +6,16 @@ import tensorflow as tf
 
 
 class MRIDataGenerator(Sequence):
-    def __init__(self, folder_path, batch_size=1, num_slices=155, num_volumes=369, split_ratio=0.2, subset='train',
-                 shuffle=True, random_state=42):
+    def __init__(self, folder_path, batch_size=1, num_slices=96, num_volumes=369, split_ratio=0.2, subset='train',
+                 shuffle=True, random_state=42, pad_to_depth=None):
         self.folder_path = folder_path
         self.batch_size = batch_size
         self.num_slices = num_slices
-        self.num_volumes = num_volumes  # Total expected volumes (0 to 368)
+        self.num_volumes = num_volumes  # Total expected volumes (1 to 369)
         self.split_ratio = split_ratio
         self.shuffle = shuffle
         self.random_state = random_state
+        self.pad_to_depth = pad_to_depth  # Optional padding target depth
 
         print(f"MRIDataGenerator: Initializing for H5 files from: {self.folder_path}")
         if not os.path.exists(self.folder_path):
@@ -96,11 +97,13 @@ class MRIDataGenerator(Sequence):
             # Resulting mask shape: (D, H, W)
             full_volume_mask = np.stack(volume_mask_slices, axis=0)
 
-            # === PREPROCESSING STEP: PAD DEPTH DIMENSION ===
-            full_volume_image = self._pad_volume_depth(full_volume_image, target_depth=160)
-            full_volume_mask = self._pad_volume_depth(full_volume_mask, target_depth=160)
-
-            print(f"After padding - Image shape: {full_volume_image.shape}, Mask shape: {full_volume_mask.shape}")
+            # === PREPROCESSING STEP: PAD DEPTH DIMENSION (if requested) ===
+            if self.pad_to_depth is not None:
+                full_volume_image = self._pad_volume_depth(full_volume_image, target_depth=self.pad_to_depth)
+                full_volume_mask = self._pad_volume_depth(full_volume_mask, target_depth=self.pad_to_depth)
+                print(f"After padding - Image shape: {full_volume_image.shape}, Mask shape: {full_volume_mask.shape}")
+            else:
+                print(f"No padding - Image shape: {full_volume_image.shape}, Mask shape: {full_volume_mask.shape}")
 
             # Normalization (per-volume)
             image_data_min = np.min(full_volume_image)
