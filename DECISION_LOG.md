@@ -20,12 +20,12 @@ The prototypes in the model were being computed but not used in the forward pass
 
 ### Solution Options
 
-#### Option 1: Use Prototypes in Decoder (SELECTED - IMPLEMENTED)
+#### Option 1: Use Prototypes in Decoder (SELECTED - IMPLEMENTED - FIXED)
 
 **Approach:**
 Integrate prototype similarities directly into the decoder path so they influence the output and receive gradients.
 
-**Implementation:**
+**Implementation (REVISED):**
 ```python
 # In __init__:
 self.prototype_to_features = layers.Conv3D(
@@ -36,9 +36,24 @@ self.prototype_to_features = layers.Conv3D(
 
 # In call():
 # After computing prototype similarities
-up = self.prototype_to_features(prototype_voxel_similarities)
-# Then continue with U-Net decoder...
+prototype_features = self.prototype_to_features(prototype_voxel_similarities)
+
+# CRITICAL FIX: Combine with original features (don't replace!)
+combined_features = layers.add([f_processed, prototype_features])
+up = combined_features  # Use combined features
 ```
+
+**⚠️ Critical Fix (2024-11-25):**
+Initial implementation replaced original features entirely with prototype features, causing severe information bottleneck:
+- Accuracy dropped to 0.01 (1%)
+- Precision at 0.01, Recall at 0.8 (predicting everything as one class)
+- Problem: 128 features → 21 prototypes → 128 features loses information
+
+**Solution:** Use element-wise addition to combine both:
+- Preserves original feature information
+- Adds prototype information on top
+- Allows gradual learning: model can rely on original features initially
+- Prototypes contribute more as they learn meaningful patterns
 
 **Pros:**
 - ✅ Simple integration with existing architecture
@@ -212,7 +227,8 @@ Multi-platform approach documented in `TRAINING_PLATFORMS.md`:
 
 | Date | Decision | Implemented By | Status |
 |------|----------|----------------|--------|
-| 2024-11-25 | Fix prototype learning (Option 1) | Claude | ✅ Implementing |
+| 2024-11-25 | Fix prototype learning (Option 1) | Claude | ✅ Complete |
+| 2024-11-25 | CRITICAL FIX: Combine features instead of replace | Claude | ✅ Complete |
 | 2024-11-25 | Data preprocessing pipeline | Claude | ✅ Complete |
 | 2024-11-25 | Multi-platform training strategy | Claude | ✅ Documented |
 

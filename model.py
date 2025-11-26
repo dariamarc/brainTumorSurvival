@@ -201,8 +201,12 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         # Shape: (B, D, H, W, num_prototypes) -> (B, D, H, W, 128)
         prototype_features = self.prototype_to_features(prototype_voxel_similarities, training=training)
 
-        # Decoder path - progressive upsampling using prototype features
-        up = prototype_features  # Start: (B, 160, 30, 30, 128) - NOW USES PROTOTYPES!
+        # Combine prototype features with original features (preserves information)
+        # This allows gradual learning: starts with original features, learns prototypes over time
+        combined_features = layers.add([f_processed, prototype_features])
+
+        # Decoder path - progressive upsampling using COMBINED features
+        up = combined_features  # Start: (B, 160, 30, 30, 128) - USES BOTH!
 
         # Upsample 1: 30x30 -> 60x60
         up = self.upsample_block1(up, training=training)  # (B, 160, 60, 60, 128)
