@@ -82,15 +82,16 @@ if __name__ == "__main__":
     # class_weights = [0.1, 1.0, 1.0]  # Give more weight to rare classes
     # loss_fn = FocalLoss(gamma=1.0, alpha=0.25, class_weights=class_weights)
 
-    # Compile with additional metrics to monitor per-class performance
+    # Compile with metrics appropriate for multi-class segmentation
+    # Note: Global precision/recall are misleading for segmentation due to class imbalance
+    # Focus on MeanIoU which is standard for segmentation evaluation
     model.compile(
         optimizer=optimizer,
         loss=loss_fn,
         metrics=[
-            'accuracy',
             keras.metrics.MeanIoU(num_classes=num_output_classes, name='mean_iou'),
-            keras.metrics.Precision(name='precision'),
-            keras.metrics.Recall(name='recall')
+            # Categorical accuracy (correct for multi-class)
+            keras.metrics.CategoricalAccuracy(name='categorical_accuracy')
         ]
     )
 
