@@ -102,6 +102,16 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         conv2_channels = dummy_encoder_outputs[1].shape[-1]  # 64
         conv3_channels = dummy_encoder_outputs[2].shape[-1]  # 128
 
+        # Prototype-to-features layer (maps prototype similarities to feature space)
+        self.prototype_to_features = layers.Conv3D(
+            128, kernel_size=1,
+            activation='relu',
+            padding='same',
+            name='prototype_to_features',
+            kernel_initializer='he_normal',
+            bias_initializer='zeros'
+        )
+
         # Decoder blocks with correct upsampling
         self.upsample_block1 = self._build_decoder_block(conv3_channels)  # 128 channels
         self.upsample_block2 = self._build_decoder_block(conv2_channels)  # 64 channels
@@ -178,7 +188,7 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         # Process bottleneck features
         f_processed = self.add_ons(f_bottleneck, training=training)  # (B, 160, 30, 30, 128)
 
-        # Prototype learning (optional - computed but not used in decoder)
+        # Prototype learning - NOW INTEGRATED INTO DECODER!
         if self.f_dist == 'l2':
             prototype_voxel_distances = self.l2_convolution_3D(f_processed)
             prototype_voxel_similarities = self.distance_2_similarity(prototype_voxel_distances)
@@ -187,8 +197,12 @@ class MProtoNet3D_Segmentation_Keras(keras.Model):
         else:
             raise NotImplementedError
 
-        # Decoder path - progressive upsampling
-        up = f_processed  # Start: (B, 160, 30, 30, 128)
+        # Map prototype similarities to feature space
+        # Shape: (B, D, H, W, num_prototypes) -> (B, D, H, W, 128)
+        prototype_features = self.prototype_to_features(prototype_voxel_similarities, training=training)
+
+        # Decoder path - progressive upsampling using prototype features
+        up = prototype_features  # Start: (B, 160, 30, 30, 128) - NOW USES PROTOTYPES!
 
         # Upsample 1: 30x30 -> 60x60
         up = self.upsample_block1(up, training=training)  # (B, 160, 60, 60, 128)

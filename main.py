@@ -48,6 +48,7 @@ if __name__ == "__main__":
 
     # the first number has to divide with the number of output classes
     # 21 / 3 = 7 - we will have 7 prototypes learned for each class
+    # NOTE: Prototypes are now integrated into decoder (see DECISION_LOG.md)
     prototype_shape = (21, 128, 1, 1, 1)
 
     model = MProtoNet3D_Segmentation_Keras(
