@@ -117,6 +117,19 @@ class MRIDataGenerator(Sequence):
 
             full_volume_mask = full_volume_mask.astype(np.int32)
 
+            # === ADD BACKGROUND CHANNEL ===
+            # Current mask shape: (D, H, W, 3) with implicit background
+            # Need to add explicit background channel at index 0
+            # Background = 1 where all tumor channels are 0
+            if len(full_volume_mask.shape) == 4:  # (D, H, W, num_tumor_classes)
+                # Sum across tumor channels - background is where sum == 0
+                tumor_sum = np.sum(full_volume_mask, axis=-1, keepdims=True)  # (D, H, W, 1)
+                background_channel = (tumor_sum == 0).astype(np.int32)  # 1 where no tumor, 0 elsewhere
+
+                # Concatenate background as first channel
+                full_volume_mask = np.concatenate([background_channel, full_volume_mask], axis=-1)
+                # New shape: (D, H, W, 4) - [background, tumor1, tumor2, tumor3]
+
             batch_images.append(full_volume_image)
             batch_masks.append(full_volume_mask)
 

@@ -125,8 +125,9 @@ def plot_mask_comparison(original_mask, preprocessed_mask, original_slice_idx, p
         preprocessed_slice_idx: slice index in preprocessed data
         volume_index: volume number for title
     """
-    mask_labels = ["GD-enhancing tumor (ET)", "Peritumoral edema (ED)", "Necrotic/non-enhancing core (NCR/NET)"]
-    num_channels = original_mask.shape[-1]
+    # Note: After data generator update, masks will have 4 channels: [background, ET, ED, NCR/NET]
+    mask_labels = ["Background", "GD-enhancing tumor (ET)", "Peritumoral edema (ED)", "Necrotic/non-enhancing core (NCR/NET)"]
+    num_channels = min(original_mask.shape[-1], len(mask_labels))
 
     # Create figure with 2 rows (original and preprocessed) and num_channels columns
     fig, axes = plt.subplots(2, num_channels, figsize=(6 * num_channels, 10))

@@ -22,8 +22,8 @@ if __name__ == "__main__":
 
     input_shape = (D, H, W, C)
 
-    # no of output classes: GD enhancing tumor, peritumoral edema, non-enhancing tumor core
-    num_output_classes = 3
+    # no of output classes: background, GD enhancing tumor, peritumoral edema, non-enhancing tumor core
+    num_output_classes = 4
 
     train_generator = MRIDataGenerator(
         folder_path,
@@ -47,9 +47,9 @@ if __name__ == "__main__":
     )
 
     # the first number has to divide with the number of output classes
-    # 21 / 3 = 7 - we will have 7 prototypes learned for each class
+    # 28 / 4 = 7 - we will have 7 prototypes learned for each class
     # NOTE: Prototypes are now integrated into decoder (see DECISION_LOG.md)
-    prototype_shape = (21, 128, 1, 1, 1)
+    prototype_shape = (28, 128, 1, 1, 1)
 
     model = MProtoNet3D_Segmentation_Keras(
         in_size=input_shape,
@@ -71,16 +71,22 @@ if __name__ == "__main__":
 
     optimizer = keras.optimizers.Adam(learning_rate=initial_learning_rate)
 
-    # OPTION 1: Use Focal Loss only (with reduced gamma)
-    # loss_fn = FocalLoss(gamma=1.0, alpha=0.25)
+    # ========== LOSS FUNCTION CONFIGURATION ==========
+    # IMPORTANT: Adjust these if Mean IoU is low (< 0.3) while accuracy is high
 
-    # OPTION 2: Use Combined Focal + Dice Loss (RECOMMENDED for medical segmentation)
-    loss_fn = CombinedLoss(focal_weight=0.5, dice_weight=0.5, gamma=1.0, alpha=0.25)
+    # OPTION 1: Dice Loss Only (BEST for severe class imbalance - try this first if IoU is low)
+    # loss_fn = DiceLoss()
 
-    # OPTION 3: If you know class imbalance ratios, use weighted focal loss
-    # For example, if class distribution is [0.9, 0.05, 0.05] (90% background, 5% each tumor type)
-    # class_weights = [0.1, 1.0, 1.0]  # Give more weight to rare classes
-    # loss_fn = FocalLoss(gamma=1.0, alpha=0.25, class_weights=class_weights)
+    # OPTION 2: Combined with MORE Dice weight (RECOMMENDED if Option 1 is unstable)
+    # Prioritizes overlap (IoU) over per-pixel accuracy
+    loss_fn = CombinedLoss(focal_weight=0.3, dice_weight=0.7, gamma=1.0, alpha=0.25)
+
+    # OPTION 3: Balanced Focal + Dice (original - use if IoU > 0.4)
+    # loss_fn = CombinedLoss(focal_weight=0.5, dice_weight=0.5, gamma=1.0, alpha=0.25)
+
+    # OPTION 4: Weighted Focal Loss (for advanced tuning)
+    # class_weights = [0.05, 1.0, 1.0, 1.0]  # [background, tumor_class_1, tumor_class_2, tumor_class_3]
+    # loss_fn = FocalLoss(gamma=2.0, alpha=0.25, class_weights=class_weights)
 
     # Compile with metrics appropriate for multi-class segmentation
     # Note: Global precision/recall are misleading for segmentation due to class imbalance
@@ -141,10 +147,11 @@ if __name__ == "__main__":
     print(f"Data reduction: ~51% smaller than original (240x240x155)")
     print(f"Initial learning rate: {initial_learning_rate}")
     print(f"Batch size: {batch_size} (increased from 2 due to smaller volumes)")
-    print(f"Loss function: Combined Focal + Dice Loss")
-    print(f"  - Focal loss gamma: 1.0 (reduced from 2.0)")
+    print(f"Loss function: Combined Focal + Dice Loss (Improved for IoU)")
+    print(f"  - Focal loss gamma: 1.0")
     print(f"  - Focal loss alpha: 0.25")
-    print(f"  - Loss weights: 50% Focal + 50% Dice")
+    print(f"  - Loss weights: 30% Focal + 70% Dice (prioritizes overlap)")
+    print(f"  - Note: Higher Dice weight helps with class imbalance")
     print(f"Max epochs: {epochs}")
     print(f"\nMetrics tracked:")
     print(f"  - Accuracy (overall voxel accuracy)")
