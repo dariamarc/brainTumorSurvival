@@ -75,11 +75,11 @@ if __name__ == "__main__":
     # IMPORTANT: Adjust these if Mean IoU is low (< 0.3) while accuracy is high
 
     # OPTION 1: Dice Loss Only (BEST for severe class imbalance - try this first if IoU is low)
-    # loss_fn = DiceLoss()
+    loss_fn = DiceLoss()
 
     # OPTION 2: Combined with MORE Dice weight (RECOMMENDED if Option 1 is unstable)
     # Prioritizes overlap (IoU) over per-pixel accuracy
-    loss_fn = CombinedLoss(focal_weight=0.3, dice_weight=0.7, gamma=1.0, alpha=0.25)
+    # loss_fn = CombinedLoss(focal_weight=0.3, dice_weight=0.7, gamma=1.0, alpha=0.25)
 
     # OPTION 3: Balanced Focal + Dice (original - use if IoU > 0.4)
     # loss_fn = CombinedLoss(focal_weight=0.5, dice_weight=0.5, gamma=1.0, alpha=0.25)
