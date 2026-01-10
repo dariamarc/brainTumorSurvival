@@ -112,116 +112,134 @@ def compute_diversity_loss(y_true, prototype_activations, prototype_class_identi
         downsample_ytrue
     )
 
-    total_diversity_loss = 0.0
-    num_valid_pairs = 0
+    total_diversity_loss = tf.constant(0.0, dtype=tf.float32)
+    num_valid_pairs = tf.constant(0, dtype=tf.int32)
 
-    # For each class
-    for c in range(num_classes):
-        # Get indices of prototypes belonging to this class
+    # Loop over each class using tf.while_loop
+    c = tf.constant(0)
+    cond_c = lambda c, *_: tf.less(c, num_classes)
+
+    def body_c(c, total_loss, valid_pairs):
         class_mask = prototype_class_identity[:, c] > 0.5
         class_proto_indices = tf.where(class_mask)
-
         num_class_protos = tf.shape(class_proto_indices)[0]
 
-        # Need at least 2 prototypes to compute pairwise similarity
-        if num_class_protos < 2:
-            continue
+        # Conditional execution for classes with at least 2 prototypes
+        def has_enough_protos():
+            # Loop over each image in batch
+            b = tf.constant(0)
+            cond_b = lambda b, *_: tf.less(b, batch_size)
 
-        # For each image in batch
-        for b in range(batch_size):
-            # Get ground truth mask for this class: (D, H, W)
-            gt_class_mask = y_true[b, :, :, :, c]
+            def body_b(b, class_loss, class_valid_pairs):
+                gt_class_mask = y_true[b, :, :, :, c]
+                class_locations = tf.where(gt_class_mask > 0.5)
+                num_points = tf.shape(class_locations)[0]
 
-            # Get spatial locations where this class is present
-            class_locations = tf.where(gt_class_mask > 0.5)
-            num_points = tf.shape(class_locations)[0]
+                # Conditional execution for images with class points
+                def has_points():
+                    # Inner loop for prototype vectors
+                    p_idx = tf.constant(0)
+                    proto_vectors_ta = tf.TensorArray(tf.float32, size=num_class_protos)
 
-            # Skip if no points of this class in this image
-            if num_points == 0:
-                continue
+                    cond_p = lambda p_idx, *_: tf.less(p_idx, num_class_protos)
 
-            # Compute prototype-class-image distance vectors
-            proto_vectors = []
+                    def body_p(p_idx, ta):
+                        proto_id = class_proto_indices[p_idx, 0]
+                        proto_id = tf.cast(proto_id, tf.int32)
+                        activation_map = prototype_activations[b, :, :, :, proto_id]
+                        point_activations = tf.gather_nd(activation_map, class_locations)
+                        distances_squared = tf.square(point_activations)
+                        v = tf.nn.softmax(distances_squared)
+                        ta = ta.write(p_idx, v)
+                        return p_idx + 1, ta
 
-            for p_idx in range(num_class_protos):
-                proto_id = class_proto_indices[p_idx, 0]
+                    _, proto_vectors_final_ta = tf.while_loop(cond_p, body_p, [p_idx, proto_vectors_ta])
+                    proto_vectors = proto_vectors_final_ta.stack()
 
-                # Get activation map for this prototype: (D, H, W)
-                activation_map = prototype_activations[b, :, :, :, proto_id]
+                    # Compute Jeffrey's similarity
+                    diversity_loss_per_class = _jeffreys_similarity(proto_vectors, epsilon)
+                    return diversity_loss_per_class, tf.constant(1, dtype=tf.int32)
 
-                # Extract activations at locations where class c is present
-                point_activations = tf.gather_nd(activation_map, class_locations)
+                def no_points():
+                    return tf.constant(0.0, dtype=tf.float32), tf.constant(0, dtype=tf.int32)
 
-                # Convert distances to probabilities using softmax
-                distances_squared = tf.square(point_activations)
-                v = tf.nn.softmax(distances_squared)
+                loss_per_b, pairs_per_b = tf.cond(tf.greater(num_points, 0), has_points, no_points)
+                return b + 1, class_loss + loss_per_b, class_valid_pairs + pairs_per_b
 
-                proto_vectors.append(v)
+            # Initial values for batch loop
+            b_init = tf.constant(0)
+            class_loss_init = tf.constant(0.0, dtype=tf.float32)
+            class_valid_pairs_init = tf.constant(0, dtype=tf.int32)
+            _, final_class_loss, final_class_pairs = tf.while_loop(cond_b, body_b, [b_init, class_loss_init, class_valid_pairs_init])
+            return final_class_loss, final_class_pairs
 
-            # Compute Jeffrey's similarity between all pairs
-            diversity_loss_per_class = _jeffreys_similarity(proto_vectors, epsilon)
-            total_diversity_loss += diversity_loss_per_class
-            num_valid_pairs += 1
+        def not_enough_protos():
+            return tf.constant(0.0, dtype=tf.float32), tf.constant(0, dtype=tf.int32)
 
-    # Average over all valid class-image pairs
-    if num_valid_pairs > 0:
-        avg_diversity_loss = total_diversity_loss / tf.cast(num_valid_pairs, tf.float32)
-    else:
-        avg_diversity_loss = 0.0
+        class_loss, class_pairs = tf.cond(tf.greater_equal(num_class_protos, 2), has_enough_protos, not_enough_protos)
+        return c + 1, total_loss + class_loss, valid_pairs + class_pairs
+
+    # Initial values for class loop
+    c_init = tf.constant(0)
+    total_loss_init = tf.constant(0.0, dtype=tf.float32)
+    valid_pairs_init = tf.constant(0, dtype=tf.int32)
+    _, total_diversity_loss, num_valid_pairs = tf.while_loop(cond_c, body_c, [c_init, total_loss_init, valid_pairs_init])
+
+    # Final averaging
+    avg_diversity_loss = tf.cond(
+        tf.greater(num_valid_pairs, 0),
+        lambda: total_diversity_loss / tf.cast(num_valid_pairs, tf.float32),
+        lambda: tf.constant(0.0, dtype=tf.float32)
+    )
 
     return lambda_j * avg_diversity_loss
 
 
 def _jeffreys_similarity(distributions, epsilon=1e-10):
     """
-    Compute Jeffrey's similarity: 1/C(n,2) * sum_{i<j} exp(-D_J(U_i, U_j))
-
-    From ProtoSeg paper Equation 3.
-
-    Args:
-        distributions: List of probability distributions (each is a 1D tensor)
-        epsilon: Small constant for numerical stability
-
-    Returns:
-        similarity: Scalar value in [0, 1]
-            - 0 if distributions have disjoint supports (perfect diversity)
-            - 1 if all distributions are identical (no diversity)
+    TensorFlow-native implementation of Jeffrey's similarity.
     """
-    n = len(distributions)
-    if n < 2:
-        return 0.0
+    n = tf.shape(distributions)[0]
 
-    total_similarity = 0.0
-    num_pairs = 0
+    def has_pairs():
+        # Create all pairs of indices
+        i_indices, j_indices = tf.meshgrid(tf.range(n), tf.range(n), indexing='ij')
+        i_flat = tf.reshape(i_indices, [-1])
+        j_flat = tf.reshape(j_indices, [-1])
+        
+        # Filter for unique pairs where i < j
+        pair_mask = tf.less(i_flat, j_flat)
+        valid_i = tf.boolean_mask(i_flat, pair_mask)
+        valid_j = tf.boolean_mask(j_flat, pair_mask)
+        
+        num_pairs = tf.shape(valid_i)[0]
 
-    # Compute pairwise Jeffrey's divergence
-    for i in range(n):
-        for j in range(i + 1, n):
-            # Get distributions
-            p = distributions[i] + epsilon
-            q = distributions[j] + epsilon
+        # Gather distributions for all pairs
+        p_dist = tf.gather(distributions, valid_i)
+        q_dist = tf.gather(distributions, valid_j)
 
-            # Normalize to ensure they sum to 1
-            p = p / tf.reduce_sum(p)
-            q = q / tf.reduce_sum(q)
+        # Add epsilon and normalize
+        p = (p_dist + epsilon) / tf.reduce_sum(p_dist + epsilon, axis=1, keepdims=True)
+        q = (q_dist + epsilon) / tf.reduce_sum(q_dist + epsilon, axis=1, keepdims=True)
 
-            # KL divergence: sum(p * log(p/q))
-            kl_pq = tf.reduce_sum(p * tf.math.log(p / q))
-            kl_qp = tf.reduce_sum(q * tf.math.log(q / p))
+        # KL Divergence for all pairs
+        kl_pq = tf.reduce_sum(p * tf.math.log(p / q), axis=1)
+        kl_qp = tf.reduce_sum(q * tf.math.log(q / p), axis=1)
 
-            # Jeffrey's divergence (Equation 2)
-            dj = 0.5 * kl_pq + 0.5 * kl_qp
+        # Jeffrey's Divergence
+        dj = 0.5 * (kl_pq + kl_qp)
+        
+        # Similarity
+        similarity = tf.exp(-dj)
+        
+        # Average similarity
+        avg_similarity = tf.reduce_mean(similarity)
+        return avg_similarity
 
-            # Convert to similarity
-            similarity = tf.exp(-dj)
+    def no_pairs():
+        return tf.constant(0.0, dtype=tf.float32)
 
-            total_similarity += similarity
-            num_pairs += 1
-
-    # Average similarity over all pairs
-    avg_similarity = total_similarity / tf.cast(num_pairs, tf.float32)
-
-    return avg_similarity
+    return tf.cond(tf.greater_equal(n, 2), has_pairs, no_pairs)
 
 
 if __name__ == "__main__":
