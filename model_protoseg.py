@@ -587,7 +587,7 @@ class ProtoSeg3D(keras.Model):
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
         # Update metrics
-        self.compiled_metrics.update_state(y, y_pred)
+        self.compiled_metrics.update_state(y, y_pred, sample_weight=None)
 
         # Return metrics dict
         metrics = {m.name: m.result() for m in self.metrics}
