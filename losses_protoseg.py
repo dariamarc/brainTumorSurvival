@@ -55,48 +55,21 @@ def compute_diversity_loss(y_true, prototype_activations, prototype_class_identi
     # Helper function to downsample y_true
     def downsample_ytrue():
         """Downsample y_true to match activation spatial dimensions."""
-        # Use tf.map_fn to process each sample in batch
-        def process_sample(sample):
-            # sample: (D, H, W, C)
-            # Use tf.map_fn to process each channel
-            def process_channel(channel):
-                # channel: (D, H, W)
-                channel_expanded = tf.expand_dims(channel, axis=-1)  # (D, H, W, 1)
+        y_true_shape = tf.shape(y_true)
+        b, d, h, w, c = y_true_shape[0], y_true_shape[1], y_true_shape[2], y_true_shape[3], y_true_shape[4]
 
-                # Use tf.map_fn to process each depth slice
-                def process_slice(slice_3d):
-                    # slice_3d: (H, W, 1)
-                    slice_batch = tf.expand_dims(slice_3d, axis=0)  # (1, H, W, 1)
-                    # Resize using nearest neighbor
-                    slice_resized = tf.image.resize(
-                        slice_batch,
-                        size=[activation_shape[2], activation_shape[3]],
-                        method='nearest'
-                    )
-                    return slice_resized[0, :, :, 0]  # (H', W')
+        # Reshape to treat depth slices as batch items
+        y_true_reshaped = tf.reshape(y_true, [b * d, h, w, c])
 
-                # Process all depth slices
-                channel_downsampled = tf.map_fn(
-                    process_slice,
-                    channel_expanded,
-                    fn_output_signature=tf.TensorSpec(shape=[None, None], dtype=tf.float32)
-                )
-                return channel_downsampled  # (D, H', W')
+        # Downsample spatially
+        y_true_resized = tf.image.resize(y_true_reshaped,
+                                         size=[activation_shape[2], activation_shape[3]],
+                                         method='nearest')
 
-            # Process all channels
-            sample_downsampled = tf.map_fn(
-                process_channel,
-                tf.transpose(sample, [3, 0, 1, 2]),  # (C, D, H, W)
-                fn_output_signature=tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)
-            )
-            return tf.transpose(sample_downsampled, [1, 2, 3, 0])  # (D, H', W', C)
+        # Reshape back to original rank
+        new_h, new_w = activation_shape[2], activation_shape[3]
+        y_true_downsampled = tf.reshape(y_true_resized, [b, d, new_h, new_w, c])
 
-        # Process all samples in batch
-        y_true_downsampled = tf.map_fn(
-            process_sample,
-            y_true,
-            fn_output_signature=tf.TensorSpec(shape=[None, None, None, None], dtype=tf.float32)
-        )
         return y_true_downsampled
 
     # Check if downsampling is needed using tf.cond
