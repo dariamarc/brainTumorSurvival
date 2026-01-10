@@ -15,6 +15,7 @@ from tensorflow import keras
 import numpy as np
 
 
+@tf.function
 def compute_diversity_loss(y_true, prototype_activations, prototype_class_identity,
                           lambda_j=0.25, epsilon=1e-10):
     """
@@ -51,48 +52,65 @@ def compute_diversity_loss(y_true, prototype_activations, prototype_class_identi
     activation_shape = tf.shape(prototype_activations)
     y_true_shape = tf.shape(y_true)
 
-    # If spatial dimensions don't match, downsample y_true
-    if not (activation_shape[1] == y_true_shape[1] and
-            activation_shape[2] == y_true_shape[2] and
-            activation_shape[3] == y_true_shape[3]):
-        # Downsample using nearest neighbor to preserve labels
-        # Process each sample and channel separately
-        y_true_downsampled_list = []
+    # Helper function to downsample y_true
+    def downsample_ytrue():
+        """Downsample y_true to match activation spatial dimensions."""
+        # Use tf.map_fn to process each sample in batch
+        def process_sample(sample):
+            # sample: (D, H, W, C)
+            # Use tf.map_fn to process each channel
+            def process_channel(channel):
+                # channel: (D, H, W)
+                channel_expanded = tf.expand_dims(channel, axis=-1)  # (D, H, W, 1)
 
-        for b in range(batch_size):
-            # For each class channel
-            channel_list = []
-            for c in range(num_classes):
-                # Extract channel: (D, H, W)
-                channel = y_true[b, :, :, :, c]
-
-                # Resize H and W dimensions
-                # Reshape to (D, H, W, 1) for tf.image.resize
-                channel_reshaped = tf.expand_dims(channel, axis=-1)
-
-                # Process each depth slice
-                slices = []
-                for d in range(tf.shape(channel_reshaped)[0]):
-                    slice_2d = channel_reshaped[d, :, :, :]  # (H, W, 1)
-                    slice_2d = tf.expand_dims(slice_2d, axis=0)  # (1, H, W, 1)
-
+                # Use tf.map_fn to process each depth slice
+                def process_slice(slice_3d):
+                    # slice_3d: (H, W, 1)
+                    slice_batch = tf.expand_dims(slice_3d, axis=0)  # (1, H, W, 1)
                     # Resize using nearest neighbor
                     slice_resized = tf.image.resize(
-                        slice_2d,
+                        slice_batch,
                         size=[activation_shape[2], activation_shape[3]],
                         method='nearest'
                     )
-                    slices.append(slice_resized[0, :, :, 0])
+                    return slice_resized[0, :, :, 0]  # (H', W')
 
-                channel_downsampled = tf.stack(slices, axis=0)  # (D, H', W')
-                channel_list.append(channel_downsampled)
+                # Process all depth slices
+                channel_downsampled = tf.map_fn(
+                    process_slice,
+                    channel_expanded,
+                    fn_output_signature=tf.TensorSpec(shape=[None, None], dtype=tf.float32)
+                )
+                return channel_downsampled  # (D, H', W')
 
-            # Stack channels
-            sample_downsampled = tf.stack(channel_list, axis=-1)  # (D, H', W', C)
-            y_true_downsampled_list.append(sample_downsampled)
+            # Process all channels
+            sample_downsampled = tf.map_fn(
+                process_channel,
+                tf.transpose(sample, [3, 0, 1, 2]),  # (C, D, H, W)
+                fn_output_signature=tf.TensorSpec(shape=[None, None, None], dtype=tf.float32)
+            )
+            return tf.transpose(sample_downsampled, [1, 2, 3, 0])  # (D, H', W', C)
 
-        # Stack batch
-        y_true = tf.stack(y_true_downsampled_list, axis=0)  # (B, D, H', W', C)
+        # Process all samples in batch
+        y_true_downsampled = tf.map_fn(
+            process_sample,
+            y_true,
+            fn_output_signature=tf.TensorSpec(shape=[None, None, None, None], dtype=tf.float32)
+        )
+        return y_true_downsampled
+
+    # Check if downsampling is needed using tf.cond
+    shapes_match = tf.reduce_all([
+        tf.equal(activation_shape[1], y_true_shape[1]),
+        tf.equal(activation_shape[2], y_true_shape[2]),
+        tf.equal(activation_shape[3], y_true_shape[3])
+    ])
+
+    y_true = tf.cond(
+        shapes_match,
+        lambda: y_true,
+        downsample_ytrue
+    )
 
     total_diversity_loss = 0.0
     num_valid_pairs = 0
