@@ -615,10 +615,13 @@ class ProtoSeg3D(keras.Model):
         gradients = tape.gradient(total_loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        # Update metrics
-        self.compiled_metrics.update_state(y, y_pred)
+        # Update metrics individually
+        # Update each metric that was configured during compile
+        for metric in self.metrics:
+            if metric.name != 'loss':  # Skip loss metric, we'll add it manually
+                metric.update_state(y, y_pred)
 
-        # Return metrics dict
+        # Build metrics dict
         metrics = {m.name: m.result() for m in self.metrics}
         metrics['loss'] = total_loss
         if hasattr(self, 'use_diversity_loss') and self.use_diversity_loss:
