@@ -24,7 +24,7 @@ class ASPP_3D(keras.layers.Layer):
     Uses multiple parallel atrous (dilated) convolutions with different rates
     to capture multi-scale context.
     """
-    def __init__(self, in_channels, out_channels=256, rates=[1, 2, 4, 6], **kwargs):
+    def __init__(self, in_channels, out_channels=128, rates=[1, 2, 4, 8], **kwargs):
         super(ASPP_3D, self).__init__(**kwargs)
         self.out_channels = out_channels
         self.rates = rates
@@ -61,7 +61,7 @@ class ASPP_3D(keras.layers.Layer):
             name='aspp_rate4'
         )
 
-        # Branch 4: 3x3x3 conv with dilation rate 6
+        # Branch 4: 3x3x3 conv with dilation rate 8
         self.aspp4 = layers.Conv3D(
             out_channels,
             kernel_size=3,
@@ -132,31 +132,31 @@ class ASPP_3D(keras.layers.Layer):
 
 def build_3d_encoder(model_name='resnet50_ri'):
     """
-    Custom 3D encoder (kept from original implementation).
+    Custom 3D encoder with isotropic pooling for isotropic data.
     Returns only the final bottleneck features (no skip connections needed).
     """
     if model_name == 'resnet50_ri':
         input_tensor = keras.Input(shape=(None, None, None, 4))  # (D, H, W, C_in)
 
-        # Encoder Block 1
+        # Encoder Block 1 - Isotropic pooling
         conv1 = layers.Conv3D(32, 3, activation='relu', padding='same',
                              kernel_initializer='he_normal')(input_tensor)
-        pool1 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv1)  # (D, H/2, W/2, 32)
+        pool1 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv1)  # (D/2, H/2, W/2, 32)
 
-        # Encoder Block 2
+        # Encoder Block 2 - Isotropic pooling
         conv2 = layers.Conv3D(64, 3, activation='relu', padding='same',
                              kernel_initializer='he_normal')(pool1)
-        pool2 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv2)  # (D, H/4, W/4, 64)
+        pool2 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv2)  # (D/4, H/4, W/4, 64)
 
-        # Encoder Block 3
+        # Encoder Block 3 - Isotropic pooling
         conv3 = layers.Conv3D(128, 3, activation='relu', padding='same',
                              kernel_initializer='he_normal')(pool2)
-        pool3 = layers.MaxPool3D(pool_size=(1, 2, 2))(conv3)  # (D, H/8, W/8, 128)
+        pool3 = layers.MaxPool3D(pool_size=(2, 2, 2))(conv3)  # (D/8, H/8, W/8, 128)
 
         # Encoder Block 4 (Bottleneck)
         conv4 = layers.Conv3D(128, 3, activation='relu', padding='same',
                              kernel_initializer='he_normal')(pool3)
-        # Final: (D, H/8, W/8, 128)
+        # Final: (D/8, H/8, W/8, 128)
 
         # Return only bottleneck (no skip connections for ProtoSeg)
         return keras.Model(inputs=input_tensor, outputs=conv4, name='encoder_3d')
@@ -183,14 +183,14 @@ class ProtoSeg3D(keras.Model):
     """
 
     def __init__(self,
-                 in_size=(96, 160, 160, 4),
+                 in_size=(128, 160, 192, 4),
                  num_classes=4,
                  num_prototypes_per_class=7,
                  features='resnet50_ri',
                  prototype_dim=128,
                  f_dist='l2',
                  prototype_activation_function='log',
-                 aspp_out_channels=256,
+                 aspp_out_channels=128,
                  **kwargs):
         super(ProtoSeg3D, self).__init__(**kwargs)
 
@@ -237,7 +237,7 @@ class ProtoSeg3D(keras.Model):
         self.aspp = ASPP_3D(
             in_channels=encoder_out_channels,
             out_channels=aspp_out_channels,
-            rates=[1, 2, 4, 6]
+            rates=[1, 2, 4, 8]
         )
 
         # Test ASPP output
@@ -266,7 +266,7 @@ class ProtoSeg3D(keras.Model):
 
         print(f"Prototype vectors shape: {self.prototype_vectors.shape}")
 
-        # --- FULLY CONNECTED LAYER (replaces decoder) ---
+        # --- FULLY CONNECTED LAYER ---
         # Maps prototype similarities to class probabilities
         # Input: (num_prototypes,) per spatial point
         # Output: (num_classes,) per spatial point
@@ -426,20 +426,20 @@ class ProtoSeg3D(keras.Model):
         # Store original shape for final upsampling
         original_shape = tf.shape(inputs)
 
-        # 1. ENCODER: Extract features
-        # (B, D, H, W, 4) → (B, D, H/8, W/8, 128)
+        # 1. ENCODER: Extract features (isotropic downsampling)
+        # (B, D, H, W, 4) → (B, D/8, H/8, W/8, 128)
         encoder_features = self.encoder(inputs, training=training)
 
         # 2. ASPP: Multi-scale context
-        # (B, D, H/8, W/8, 128) → (B, D, H/8, W/8, 256)
+        # (B, D/8, H/8, W/8, 128) → (B, D/8, H/8, W/8, 128)
         aspp_features = self.aspp(encoder_features, training=training)
 
         # 3. PROJECT to prototype dimension
-        # (B, D, H/8, W/8, 256) → (B, D, H/8, W/8, prototype_dim)
+        # (B, D/8, H/8, W/8, 128) → (B, D/8, H/8, W/8, prototype_dim)
         projected_features = self.feature_projection(aspp_features, training=training)
 
         # 4. PROTOTYPE LAYER: Compute similarities
-        # (B, D, H/8, W/8, prototype_dim) → (B, D, H/8, W/8, num_prototypes)
+        # (B, D/8, H/8, W/8, prototype_dim) → (B, D/8, H/8, W/8, num_prototypes)
         if self.f_dist == 'l2':
             prototype_distances = self.l2_convolution_3D(projected_features)
             prototype_similarities = self.distance_2_similarity(prototype_distances)
@@ -450,7 +450,7 @@ class ProtoSeg3D(keras.Model):
 
         # 5. FULLY CONNECTED LAYER: Prototype similarities → Class logits
         # Process each spatial point independently
-        # (B, D, H/8, W/8, num_prototypes) → (B, D, H/8, W/8, num_classes)
+        # (B, D/8, H/8, W/8, num_prototypes) → (B, D/8, H/8, W/8, num_classes)
 
         # Get feature map shape
         feat_shape = tf.shape(prototype_similarities)
@@ -474,13 +474,14 @@ class ProtoSeg3D(keras.Model):
             [batch_size, d_feat, h_feat, w_feat, self.num_classes]
         )
 
-        # 6. UPSAMPLE to original resolution using BILINEAR INTERPOLATION
+        # 6. UPSAMPLE to original resolution using TRILINEAR INTERPOLATION
         # This is NOT learned (different from U-Net decoder)
-        # (B, D, H/8, W/8, num_classes) → (B, D, H, W, num_classes)
+        # (B, D/8, H/8, W/8, num_classes) → (B, D, H, W, num_classes)
 
-        # Upsample H and W dimensions
-        # TensorFlow's resize works on last 2 dims, so we need to handle D separately
+        # Since we now use isotropic pooling, we need to upsample D, H, and W
+        # Strategy: First upsample H and W, then upsample D
 
+        # Step 1: Upsample H and W using tf.image.resize
         # Permute to (B, num_classes, D, H, W) for easier processing
         logits_permuted = tf.transpose(logits_low_res, [0, 4, 1, 2, 3])
 
@@ -491,20 +492,47 @@ class ProtoSeg3D(keras.Model):
         )
 
         # Resize H and W
-        logits_upsampled = tf.image.resize(
+        logits_hw_upsampled = tf.image.resize(
             logits_reshaped,
             size=[original_shape[2], original_shape[3]],
             method='bilinear'
         )
 
         # Reshape back: (B*num_classes*D, H, W, 1) → (B, num_classes, D, H, W)
-        logits_upsampled = tf.reshape(
-            logits_upsampled,
+        logits_hw_upsampled = tf.reshape(
+            logits_hw_upsampled,
             [batch_size, self.num_classes, d_feat, original_shape[2], original_shape[3]]
         )
 
-        # Permute back: (B, num_classes, D, H, W) → (B, D, H, W, num_classes)
-        output_logits = tf.transpose(logits_upsampled, [0, 2, 3, 4, 1])
+        # Step 2: Upsample D dimension
+        # Permute to (B, num_classes, H, W, D) so D is last
+        logits_permuted2 = tf.transpose(logits_hw_upsampled, [0, 1, 3, 4, 2])
+
+        # Reshape to (B*num_classes*H*W, D, 1) for tf.image.resize
+        logits_reshaped2 = tf.reshape(
+            logits_permuted2,
+            [batch_size * self.num_classes * original_shape[2] * original_shape[3], d_feat, 1]
+        )
+
+        # Add channel dimension for resize
+        logits_reshaped2 = tf.expand_dims(logits_reshaped2, axis=-1)
+
+        # Resize D dimension
+        logits_d_upsampled = tf.image.resize(
+            logits_reshaped2,
+            size=[original_shape[1], 1],
+            method='bilinear'
+        )
+
+        # Remove extra dimension and reshape
+        logits_d_upsampled = tf.squeeze(logits_d_upsampled, axis=-1)
+        logits_d_upsampled = tf.reshape(
+            logits_d_upsampled,
+            [batch_size, self.num_classes, original_shape[2], original_shape[3], original_shape[1]]
+        )
+
+        # Permute back: (B, num_classes, H, W, D) → (B, D, H, W, num_classes)
+        output_logits = tf.transpose(logits_d_upsampled, [0, 4, 2, 3, 1])
 
         return output_logits
 
@@ -739,40 +767,3 @@ class ProtoSeg3D(keras.Model):
         print(f"  Prototypes: {self.prototype_vectors._trainable if hasattr(self.prototype_vectors, '_trainable') else self.prototype_vectors.trainable}")
         print(f"  FC layer: {self.fc_layer.trainable}")
         print()
-
-
-if __name__ == "__main__":
-    # Test the model
-    print("\n" + "="*80)
-    print("Testing ProtoSeg3D Model")
-    print("="*80 + "\n")
-
-    # Create model
-    model = ProtoSeg3D(
-        in_size=(96, 160, 160, 4),
-        num_classes=4,
-        num_prototypes_per_class=7,
-        prototype_dim=128,
-        f_dist='l2'
-    )
-
-    # Test forward pass
-    dummy_input = tf.random.normal((2, 96, 160, 160, 4))
-    print(f"Input shape: {dummy_input.shape}")
-
-    output = model(dummy_input, training=False)
-    print(f"Output shape: {output.shape}")
-
-    # Check prototype info
-    proto_info = model.get_prototype_info()
-    print(f"\nPrototype Information:")
-    print(f"  Total prototypes: {proto_info['num_prototypes']}")
-    print(f"  Prototypes per class: {proto_info['prototypes_per_class']}")
-    print(f"  Prototype dimension: {proto_info['prototype_dim']}")
-    print(f"  FC weights shape: {proto_info['fc_weights'].shape}")
-    print(f"\nFC weights (first 5 prototypes, all classes):")
-    print(proto_info['fc_weights'][:5, :])
-
-    print("\n" + "="*80)
-    print("Test completed successfully!")
-    print("="*80 + "\n")

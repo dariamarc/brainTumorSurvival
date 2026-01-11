@@ -1,6 +1,7 @@
 """
 Data Preprocessing Script for Brain Tumor MRI
-Downsamples volumes from 240x240x155 to 160x160x96 for faster training.
+Uses CENTER CROPPING ONLY (no resizing) to preserve original resolution and avoid blurring small labels.
+Crops volumes from 240×240×155 to 192×160×128 (H×W×D).
 
 Usage:
     python preprocess_data.py --input_dir /path/to/original/data --output_dir /path/to/preprocessed/data
@@ -10,76 +11,44 @@ import os
 import argparse
 import h5py
 import numpy as np
-from scipy.ndimage import zoom
 from tqdm import tqdm
 
 
-def downsample_volume(volume, target_shape):
+def center_crop_2d(array, target_height, target_width):
     """
-    Downsample a volume to target shape using trilinear interpolation.
+    Center crop a 2D array or 2D slice.
 
     Args:
-        volume: numpy array of shape (D, H, W) or (D, H, W, C)
-        target_shape: tuple (target_D, target_H, target_W)
+        array: numpy array of shape (H, W) or (H, W, C)
+        target_height: target height after cropping
+        target_width: target width after cropping
 
     Returns:
-        downsampled volume
+        cropped array
     """
-    current_shape = volume.shape
+    current_height, current_width = array.shape[0], array.shape[1]
 
-    if len(current_shape) == 4:  # (D, H, W, C) - image with channels
-        D, H, W, C = current_shape
-        target_D, target_H, target_W = target_shape
+    if current_height < target_height or current_width < target_width:
+        raise ValueError(f"Cannot crop from ({current_height}, {current_width}) to ({target_height}, {target_width})")
 
-        # Calculate zoom factors for each dimension (excluding channels)
-        zoom_factors = (target_D / D, target_H / H, target_W / W, 1)
-    else:  # (D, H, W) - mask
-        D, H, W = current_shape
-        target_D, target_H, target_W = target_shape
+    # Calculate crop indices for height
+    start_h = (current_height - target_height) // 2
+    end_h = start_h + target_height
 
-        # Calculate zoom factors
-        zoom_factors = (target_D / D, target_H / H, target_W / W)
+    # Calculate crop indices for width
+    start_w = (current_width - target_width) // 2
+    end_w = start_w + target_width
 
-    # Use order=1 (linear) for images, order=0 (nearest) for masks
-    if len(current_shape) == 4:
-        downsampled = zoom(volume, zoom_factors, order=1, mode='nearest')
-    else:
-        downsampled = zoom(volume, zoom_factors, order=0, mode='nearest')
-
-    return downsampled
+    # Crop
+    if len(array.shape) == 3:  # (H, W, C)
+        return array[start_h:end_h, start_w:end_w, :]
+    else:  # (H, W)
+        return array[start_h:end_h, start_w:end_w]
 
 
-def center_crop_depth(volume, target_depth):
+def preprocess_slice_file(input_path, output_path, target_spatial=(192, 160)):
     """
-    Center crop the depth dimension.
-
-    Args:
-        volume: numpy array with shape (D, H, W) or (D, H, W, C)
-        target_depth: target depth after cropping
-
-    Returns:
-        cropped volume
-    """
-    current_depth = volume.shape[0]
-
-    if current_depth <= target_depth:
-        # If already smaller or equal, return as is
-        return volume
-
-    # Calculate crop indices
-    start = (current_depth - target_depth) // 2
-    end = start + target_depth
-
-    # Crop depth dimension
-    if len(volume.shape) == 4:  # Image with channels
-        return volume[start:end, :, :, :]
-    else:  # Mask
-        return volume[start:end, :, :]
-
-
-def preprocess_slice_file(input_path, output_path, target_spatial=(160, 160)):
-    """
-    Preprocess a single H5 slice file.
+    Preprocess a single H5 slice file using CENTER CROPPING ONLY.
 
     Args:
         input_path: path to original H5 file
@@ -91,87 +60,70 @@ def preprocess_slice_file(input_path, output_path, target_spatial=(160, 160)):
         image = f_in['image'][:]
         mask = f_in['mask'][:]
 
-    # Handle mask shape variations
-    # Mask might be (H, W) or (H, W, num_classes)
-    if len(mask.shape) == 3:
-        # If mask has 3 dimensions (H, W, C), we need to handle it differently
-        mask_has_channels = True
-        H, W, num_classes = mask.shape
-    elif len(mask.shape) == 2:
-        # Normal case: (H, W)
-        mask_has_channels = False
-        H, W = mask.shape
-    else:
-        raise ValueError(f"Unexpected mask shape in {input_path}: {mask.shape}")
-
-    # Verify image shape
+    # Verify shapes
     if len(image.shape) != 3:
         raise ValueError(f"Unexpected image shape in {input_path}: {image.shape}")
 
     target_H, target_W = target_spatial
 
-    # Calculate zoom factors for spatial dimensions
-    zoom_factor_H = target_H / H
-    zoom_factor_W = target_W / W
+    # Center crop image (H, W, C)
+    cropped_image = center_crop_2d(image, target_H, target_W)
 
-    # Downsample image (H, W, C)
-    zoom_factors_image = (zoom_factor_H, zoom_factor_W, 1)
-    downsampled_image = zoom(image, zoom_factors_image, order=1, mode='nearest')
-
-    # Downsample mask - handle both 2D and 3D cases
-    if mask_has_channels:
-        # Mask is (H, W, num_classes)
-        zoom_factors_mask = (zoom_factor_H, zoom_factor_W, 1)
-        downsampled_mask = zoom(mask, zoom_factors_mask, order=0, mode='nearest')
-    else:
-        # Mask is (H, W)
-        zoom_factors_mask = (zoom_factor_H, zoom_factor_W)
-        downsampled_mask = zoom(mask, zoom_factors_mask, order=0, mode='nearest')
+    # Center crop mask - handle both 2D and 3D cases
+    cropped_mask = center_crop_2d(mask, target_H, target_W)
 
     # Save preprocessed data
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with h5py.File(output_path, 'w') as f_out:
-        f_out.create_dataset('image', data=downsampled_image, compression='gzip')
-        f_out.create_dataset('mask', data=downsampled_mask, compression='gzip')
+        f_out.create_dataset('image', data=cropped_image, compression='gzip')
+        f_out.create_dataset('mask', data=cropped_mask, compression='gzip')
 
 
 def preprocess_dataset(input_dir, output_dir, num_volumes=369, num_slices=155,
-                       target_spatial=(160, 160), target_slices=96):
+                       target_spatial=(160, 192), target_slices=128):
     """
-    Preprocess entire dataset.
+    Preprocess entire dataset using CENTER CROPPING ONLY (no resizing).
 
     Args:
         input_dir: directory containing original H5 files
         output_dir: directory to save preprocessed H5 files
         num_volumes: total number of volumes (default 369)
         num_slices: number of slices per volume in original data (default 155)
-        target_spatial: tuple (target_H, target_W) for spatial downsampling
-        target_slices: target number of slices to keep (will center crop)
+        target_spatial: tuple (target_H, target_W) for center cropping (default 192×160)
+        target_slices: target number of slices to keep via center crop (default 128)
     """
-    print("=" * 70)
-    print("BRAIN TUMOR MRI DATA PREPROCESSING")
-    print("=" * 70)
+    print("=" * 80)
+    print("BRAIN TUMOR MRI DATA PREPROCESSING - CENTER CROP ONLY")
+    print("=" * 80)
     print(f"Input directory: {input_dir}")
     print(f"Output directory: {output_dir}")
-    print(f"Original dimensions: ({num_slices}, 240, 240, 4)")
-    print(f"Target dimensions: ({target_slices}, {target_spatial[0]}, {target_spatial[1]}, 4)")
+    print(f"Original dimensions: ({num_slices}, 240, 240, 4) [D×H×W×C]")
+    print(f"Target dimensions: ({target_slices}, {target_spatial[0]}, {target_spatial[1]}, 4) [D×H×W×C]")
     print(f"Total volumes: {num_volumes}")
     print(f"Processing volumes 1 to {num_volumes}")
-    print("=" * 70)
+    print(f"\n✓ Method: CENTER CROPPING ONLY (preserves original resolution)")
+    print(f"✓ No resizing/interpolation - avoids blurring small labels")
+    print("=" * 80)
 
     if not os.path.exists(input_dir):
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Calculate which slices to keep (center crop)
+    # Calculate which slices to keep (center crop in depth dimension)
+    if target_slices > num_slices:
+        raise ValueError(f"Cannot crop to {target_slices} slices from {num_slices} slices")
+
     slice_start = (num_slices - target_slices) // 2
     slice_end = slice_start + target_slices
     slices_to_keep = list(range(slice_start, slice_end))
 
-    print(f"\nKeeping slices {slice_start} to {slice_end-1} (center {target_slices} slices)")
+    print(f"\n📏 Cropping details:")
+    print(f"  - Depth: Keeping slices {slice_start} to {slice_end-1} (center {target_slices} slices)")
+    print(f"  - Height: Cropping from 240 to {target_spatial[0]} (center crop)")
+    print(f"  - Width: Cropping from 240 to {target_spatial[1]} (center crop)")
     print("\nStarting preprocessing...")
-    print("-" * 70)
+    print("-" * 80)
 
     total_files = num_volumes * target_slices
     processed_count = 0
@@ -183,7 +135,7 @@ def preprocess_dataset(input_dir, output_dir, num_volumes=369, num_slices=155,
                 input_filename = f"volume_{volume_id}_slice_{original_slice_idx}.h5"
                 input_path = os.path.join(input_dir, input_filename)
 
-                # Output file path (renumber slices to 0-95)
+                # Output file path (renumber slices to 0-127 for target_slices=128)
                 output_filename = f"volume_{volume_id}_slice_{new_slice_idx}.h5"
                 output_path = os.path.join(output_dir, output_filename)
 
@@ -201,9 +153,9 @@ def preprocess_dataset(input_dir, output_dir, num_volumes=369, num_slices=155,
 
                 pbar.update(1)
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("PREPROCESSING COMPLETE!")
-    print("=" * 70)
+    print("=" * 80)
     print(f"✓ Processed {processed_count} / {total_files} files")
     print(f"✓ Output saved to: {output_dir}")
 
@@ -212,15 +164,18 @@ def preprocess_dataset(input_dir, output_dir, num_volumes=369, num_slices=155,
     new_size = target_spatial[0] * target_spatial[1] * target_slices
     reduction = (1 - new_size / original_size) * 100
 
-    print(f"\n📊 Data Reduction:")
+    print(f"\n📊 Data Statistics:")
     print(f"  - Original volume size: {num_slices} × 240 × 240 = {original_size:,} voxels")
-    print(f"  - New volume size: {target_slices} × {target_spatial[0]} × {target_spatial[1]} = {new_size:,} voxels")
-    print(f"  - Reduction: {reduction:.1f}%")
-    print("=" * 70)
+    print(f"  - Cropped volume size: {target_slices} × {target_spatial[0]} × {target_spatial[1]} = {new_size:,} voxels")
+    print(f"  - Size reduction: {reduction:.1f}%")
+    print(f"  - Voxels retained: {100-reduction:.1f}%")
+    print(f"\n✓ Original resolution preserved (no interpolation)")
+    print(f"✓ Small tumor features intact")
+    print("=" * 80)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Preprocess brain tumor MRI data')
+    parser = argparse.ArgumentParser(description='Preprocess brain tumor MRI data using center cropping only')
     parser.add_argument('--input_dir', type=str, required=True,
                        help='Directory containing original H5 files')
     parser.add_argument('--output_dir', type=str, required=True,
@@ -230,11 +185,11 @@ def main():
     parser.add_argument('--num_slices', type=int, default=155,
                        help='Number of slices per volume in original data (default: 155)')
     parser.add_argument('--target_height', type=int, default=160,
-                       help='Target height after downsampling (default: 160)')
-    parser.add_argument('--target_width', type=int, default=160,
-                       help='Target width after downsampling (default: 160)')
-    parser.add_argument('--target_slices', type=int, default=96,
-                       help='Target number of slices (will center crop, default: 96)')
+                       help='Target height after center cropping (default: 160)')
+    parser.add_argument('--target_width', type=int, default=192,
+                       help='Target width after center cropping (default: 192)')
+    parser.add_argument('--target_slices', type=int, default=128,
+                       help='Target number of slices via center crop (default: 128)')
 
     args = parser.parse_args()
 
