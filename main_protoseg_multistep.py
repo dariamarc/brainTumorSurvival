@@ -138,7 +138,7 @@ if __name__ == "__main__":
 
     # ========== CONFIGURATION ==========
     # Data configuration
-    folder_path = "preprocessed_data"
+    folder_path = "preprocessed_data_cropped"
     batch_size = 2
     split_ratio = 0.2
     random_state = 42

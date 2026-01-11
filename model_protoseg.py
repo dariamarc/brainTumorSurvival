@@ -563,14 +563,8 @@ class ProtoSeg3D(keras.Model):
         Return list of all metrics including loss tracker.
         Required for custom train_step.
         """
-        # Start with loss tracker
-        metrics_list = [self.loss_tracker]
-
-        # Add compiled metrics if they exist
-        if hasattr(self, '_metrics'):
-            metrics_list.extend(self._metrics)
-
-        return metrics_list
+        # Return loss tracker plus any compiled metrics
+        return [self.loss_tracker] + super().metrics
 
     def train_step(self, data):
         """
@@ -633,18 +627,18 @@ class ProtoSeg3D(keras.Model):
         gradients = tape.gradient(total_loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        # Update metrics
         # Update loss tracker
         self.loss_tracker.update_state(total_loss)
 
-        # Update other metrics (MeanIoU, Accuracy)
-        for metric in self.metrics:
-            if metric.name == 'loss':
-                continue  # Already updated via loss_tracker
+        # Update compiled metrics using the parent class method
+        # This avoids the sample_weight conflict
+        for metric in super().metrics:
             metric.update_state(y, y_pred)
 
         # Return all metrics
-        result = {m.name: m.result() for m in self.metrics}
+        result = {self.loss_tracker.name: self.loss_tracker.result()}
+        for metric in super().metrics:
+            result[metric.name] = metric.result()
 
         # Add additional metrics for debugging
         if hasattr(self, 'use_diversity_loss') and self.use_diversity_loss:
