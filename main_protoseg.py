@@ -19,16 +19,16 @@ if __name__ == "__main__":
     print("="*80 + "\n")
 
     # ========== DATA CONFIGURATION ==========
-    folder_path = "preprocessed_data"  # Preprocessed: 160x160x96
+    folder_path = "preprocessed_data"  # Preprocessed: 128×160×192 (center-cropped only)
 
     batch_size = 2  # Reduced from 4 due to larger memory footprint
     split_ratio = 0.2
     random_state = 42
 
-    # PREPROCESSED DATA DIMENSIONS (160x160x96)
-    D = 96   # Depth
+    # PREPROCESSED DATA DIMENSIONS (128×160×192)
+    D = 128  # Depth
     H = 160  # Height
-    W = 160  # Width
+    W = 192  # Width
     C = 4    # Channels: FLAIR, T1, T1ce, T2
 
     input_shape = (D, H, W, C)

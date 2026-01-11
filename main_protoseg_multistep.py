@@ -143,8 +143,8 @@ if __name__ == "__main__":
     split_ratio = 0.2
     random_state = 42
 
-    # Input dimensions
-    D, H, W, C = 96, 160, 160, 4
+    # Input dimensions (preprocessed: 128×160×192, center-cropped only)
+    D, H, W, C = 128, 160, 192, 4
     input_shape = (D, H, W, C)
     num_output_classes = 4
 

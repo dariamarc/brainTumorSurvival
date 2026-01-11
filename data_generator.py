@@ -6,7 +6,7 @@ import tensorflow as tf
 
 
 class MRIDataGenerator(Sequence):
-    def __init__(self, folder_path, batch_size=1, num_slices=96, num_volumes=369, split_ratio=0.2, subset='train',
+    def __init__(self, folder_path, batch_size=1, num_slices=128, num_volumes=369, split_ratio=0.2, subset='train',
                  shuffle=True, random_state=42, pad_to_depth=None):
         self.folder_path = folder_path
         self.batch_size = batch_size
