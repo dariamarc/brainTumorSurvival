@@ -19,7 +19,7 @@ if __name__ == "__main__":
     print("="*80 + "\n")
 
     # ========== DATA CONFIGURATION ==========
-    folder_path = "preprocessed_data"  # Preprocessed: 128×160×192 (center-cropped only)
+    folder_path = "preprocessed_data_cropped"  # Preprocessed: 128×160×192 (center-cropped only)
 
     batch_size = 2  # Reduced from 4 due to larger memory footprint
     split_ratio = 0.2

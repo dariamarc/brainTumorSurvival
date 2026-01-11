@@ -283,6 +283,9 @@ class ProtoSeg3D(keras.Model):
         # w_h^(c,j) = -0.5 otherwise
         self._initialize_fc_weights()
 
+        # Loss tracker for custom train_step
+        self.loss_tracker = keras.metrics.Mean(name='loss')
+
         print(f"\nModel initialized successfully!")
         print(f"{'='*80}\n")
 
@@ -554,6 +557,21 @@ class ProtoSeg3D(keras.Model):
             'fc_bias': self.fc_layer.get_weights()[1]
         }
 
+    @property
+    def metrics(self):
+        """
+        Return list of all metrics including loss tracker.
+        Required for custom train_step.
+        """
+        # Start with loss tracker
+        metrics_list = [self.loss_tracker]
+
+        # Add compiled metrics if they exist
+        if hasattr(self, '_metrics'):
+            metrics_list.extend(self._metrics)
+
+        return metrics_list
+
     def train_step(self, data):
         """
         Custom training step with diversity loss.
@@ -575,26 +593,26 @@ class ProtoSeg3D(keras.Model):
             # Forward pass to get logits
             y_pred = self(x, training=True)
 
-            # Also need to get prototype activations for diversity loss
-            # Re-compute forward pass components (inefficient but works for now)
-            encoder_features = self.encoder(x, training=True)
-            aspp_features = self.aspp(encoder_features, training=True)
-            projected_features = self.feature_projection(aspp_features, training=True)
-
-            # Compute prototype similarities (needed for diversity loss)
-            if self.f_dist == 'l2':
-                prototype_distances = self.l2_convolution_3D(projected_features)
-                prototype_similarities = self.distance_2_similarity(prototype_distances)
-            elif self.f_dist == 'cosine':
-                prototype_similarities = self.cosine_convolution_3D(projected_features)
-            else:
-                raise NotImplementedError(f"Unknown distance metric: {self.f_dist}")
-
-            # Compute cross-entropy loss
-            ce_loss = self.compiled_loss(y, y_pred)
+            # Compute cross-entropy loss using compiled loss function
+            # This computes the loss but doesn't track it yet
+            ce_loss = self.compute_loss(x, y, y_pred)
 
             # Compute diversity loss if enabled
             if hasattr(self, 'use_diversity_loss') and self.use_diversity_loss:
+                # Re-compute forward pass components for diversity loss
+                encoder_features = self.encoder(x, training=True)
+                aspp_features = self.aspp(encoder_features, training=True)
+                projected_features = self.feature_projection(aspp_features, training=True)
+
+                # Compute prototype similarities (needed for diversity loss)
+                if self.f_dist == 'l2':
+                    prototype_distances = self.l2_convolution_3D(projected_features)
+                    prototype_similarities = self.distance_2_similarity(prototype_distances)
+                elif self.f_dist == 'cosine':
+                    prototype_similarities = self.cosine_convolution_3D(projected_features)
+                else:
+                    raise NotImplementedError(f"Unknown distance metric: {self.f_dist}")
+
                 from losses_protoseg import compute_diversity_loss
 
                 diversity_loss = compute_diversity_loss(
@@ -615,20 +633,25 @@ class ProtoSeg3D(keras.Model):
         gradients = tape.gradient(total_loss, trainable_vars)
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
-        # Update metrics individually
-        # Update each metric that was configured during compile
+        # Update metrics
+        # Update loss tracker
+        self.loss_tracker.update_state(total_loss)
+
+        # Update other metrics (MeanIoU, Accuracy)
         for metric in self.metrics:
-            if metric.name != 'loss':  # Skip loss metric, we'll add it manually
-                metric.update_state(y, y_pred)
+            if metric.name == 'loss':
+                continue  # Already updated via loss_tracker
+            metric.update_state(y, y_pred)
 
-        # Build metrics dict
-        metrics = {m.name: m.result() for m in self.metrics}
-        metrics['loss'] = total_loss
+        # Return all metrics
+        result = {m.name: m.result() for m in self.metrics}
+
+        # Add additional metrics for debugging
         if hasattr(self, 'use_diversity_loss') and self.use_diversity_loss:
-            metrics['ce_loss'] = ce_loss
-            metrics['diversity_loss'] = diversity_loss
+            result['ce_loss'] = ce_loss
+            result['diversity_loss'] = diversity_loss
 
-        return metrics
+        return result
 
     def enable_diversity_loss(self, lambda_j=0.25):
         """
