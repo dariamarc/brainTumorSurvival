@@ -581,11 +581,12 @@ class ProtoSeg3D(keras.Model):
             aspp_features = self.aspp(encoder_features, training=True)
             projected_features = self.feature_projection(aspp_features, training=True)
 
-            # Compute prototype distances (needed for diversity loss)
+            # Compute prototype similarities (needed for diversity loss)
             if self.f_dist == 'l2':
                 prototype_distances = self.l2_convolution_3D(projected_features)
+                prototype_similarities = self.distance_2_similarity(prototype_distances)
             elif self.f_dist == 'cosine':
-                prototype_distances = self.cosine_convolution_3D(projected_features)
+                prototype_similarities = self.cosine_convolution_3D(projected_features)
             else:
                 raise NotImplementedError(f"Unknown distance metric: {self.f_dist}")
 
@@ -598,7 +599,7 @@ class ProtoSeg3D(keras.Model):
 
                 diversity_loss = compute_diversity_loss(
                     y,
-                    prototype_distances,
+                    prototype_similarities,
                     self.prototype_class_identity,
                     lambda_j=self.diversity_lambda
                 )
