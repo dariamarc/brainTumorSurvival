@@ -645,3 +645,46 @@ class PrototypeTrainer:
             self.train_phase3()
         else:
             raise ValueError(f"Invalid phase: {phase}")
+
+    def get_full_history(self):
+        """
+        Get combined training history from all phases.
+
+        Returns:
+            Dictionary with combined metrics across all phases.
+        """
+        combined = {
+            'total_loss': [],
+            'val_total_loss': [],
+            'dice_loss': [],
+            'val_dice_loss': [],
+            'purity_loss': [],
+            'val_purity_loss': [],
+            'mean_iou': [],
+            'val_mean_iou': []
+        }
+
+        # Process each phase
+        for phase_name in ['phase1', 'phase2', 'phase3']:
+            for entry in self.history.get(phase_name, []):
+                # Training losses
+                combined['total_loss'].append(entry.get('train_loss', 0))
+                if 'train_losses' in entry:
+                    combined['dice_loss'].append(
+                        entry['train_losses'].get('segmentation', 0)
+                    )
+                    combined['purity_loss'].append(
+                        entry['train_losses'].get('purity', 0)
+                    )
+
+                # Validation losses
+                combined['val_total_loss'].append(entry.get('val_loss', 0))
+                if 'val_losses' in entry:
+                    combined['val_dice_loss'].append(
+                        entry['val_losses'].get('segmentation', 0)
+                    )
+                    combined['val_purity_loss'].append(
+                        entry['val_losses'].get('purity', 0)
+                    )
+
+        return combined
