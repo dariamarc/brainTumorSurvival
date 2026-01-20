@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 
 
-class SeparationLoss(keras.losses.Loss):
+class SeparationLoss:
     """
     Prototype Separation Loss.
 
@@ -14,17 +13,15 @@ class SeparationLoss(keras.losses.Loss):
     Used in Phase 2.
     """
 
-    def __init__(self, n_prototypes=3, **kwargs):
-        super(SeparationLoss, self).__init__(**kwargs)
+    def __init__(self, n_prototypes=3):
         self.n_prototypes = n_prototypes
         self.epsilon = 1e-6
 
-    def call(self, y_true, prototypes):
+    def __call__(self, prototypes):
         """
         Compute Separation loss.
 
         Args:
-            y_true: Unused (required by Keras loss interface)
             prototypes: (n_prototypes, C, 1, 1, 1) prototype vectors
 
         Returns:
@@ -54,8 +51,3 @@ class SeparationLoss(keras.losses.Loss):
 
         # Maximize minimum distance (return negative log)
         return -tf.math.log(min_distance + self.epsilon)
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({'n_prototypes': self.n_prototypes})
-        return config

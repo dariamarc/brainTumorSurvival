@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 
 
-class DiversityLoss(keras.losses.Loss):
+class DiversityLoss:
     """
     Prototype Diversity Loss.
 
@@ -12,17 +11,15 @@ class DiversityLoss(keras.losses.Loss):
     Used in Phase 1 to establish diverse initial prototypes.
     """
 
-    def __init__(self, n_prototypes=3, **kwargs):
-        super(DiversityLoss, self).__init__(**kwargs)
+    def __init__(self, n_prototypes=3):
         self.n_prototypes = n_prototypes
         self.epsilon = 1e-8
 
-    def call(self, y_true, prototypes):
+    def __call__(self, prototypes):
         """
         Compute Diversity loss.
 
         Args:
-            y_true: Unused (required by Keras loss interface)
             prototypes: (n_prototypes, C, 1, 1, 1) prototype vectors
 
         Returns:
@@ -49,8 +46,3 @@ class DiversityLoss(keras.losses.Loss):
         loss = tf.reduce_sum(tf.abs(off_diagonal_sim)) / (self.n_prototypes * (self.n_prototypes - 1))
 
         return loss
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({'n_prototypes': self.n_prototypes})
-        return config

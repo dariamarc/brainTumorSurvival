@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 
 
-class ActivationConsistencyLoss(keras.losses.Loss):
+class ActivationConsistencyLoss:
     """
     Activation Consistency Loss.
 
@@ -14,24 +13,22 @@ class ActivationConsistencyLoss(keras.losses.Loss):
     Used in Phase 3 after prototype projection.
     """
 
-    def __init__(self, n_prototypes=3, n_classes=4, **kwargs):
-        super(ActivationConsistencyLoss, self).__init__(**kwargs)
+    def __init__(self, n_prototypes=3, n_classes=4):
         self.n_prototypes = n_prototypes
         self.n_classes = n_classes
         self.epsilon = 1e-6
 
-    def call(self, inputs, similarities):
+    def __call__(self, masks, similarities):
         """
         Compute Activation Consistency loss.
 
         Args:
-            inputs: (B, D, H, W, n_classes) one-hot masks
+            masks: (B, D, H, W, n_classes) one-hot masks
             similarities: (B, D, H, W, n_prototypes) prototype similarity maps
 
         Returns:
             Activation consistency loss scalar
         """
-        masks = inputs
         loss = 0.0
         count = 0
 
@@ -68,11 +65,3 @@ class ActivationConsistencyLoss(keras.losses.Loss):
             loss = loss / tf.cast(count, tf.float32)
 
         return loss
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            'n_prototypes': self.n_prototypes,
-            'n_classes': self.n_classes
-        })
-        return config

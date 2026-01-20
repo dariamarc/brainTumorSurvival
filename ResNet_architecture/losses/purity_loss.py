@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 
 
-class PurityLoss(keras.losses.Loss):
+class PurityLoss:
     """
     Prototype Purity Loss.
 
@@ -13,16 +12,15 @@ class PurityLoss(keras.losses.Loss):
     Critical for establishing class-specific prototypes.
     """
 
-    def __init__(self, n_prototypes=3, **kwargs):
-        super(PurityLoss, self).__init__(**kwargs)
+    def __init__(self, n_prototypes=3):
         self.n_prototypes = n_prototypes
 
-    def call(self, y_true, similarities):
+    def __call__(self, masks, similarities):
         """
         Compute Purity loss.
 
         Args:
-            y_true: (B, D, H, W, n_classes) one-hot ground truth masks
+            masks: (B, D, H, W, n_classes) one-hot ground truth masks
             similarities: (B, D, H, W, n_prototypes) prototype similarity maps
 
         Returns:
@@ -37,7 +35,7 @@ class PurityLoss(keras.losses.Loss):
             proto_sim = similarities[..., proto_idx]  # (B, D, H, W)
 
             # Target mask (where this prototype should activate)
-            target_mask = y_true[..., target_class]  # (B, D, H, W)
+            target_mask = masks[..., target_class]  # (B, D, H, W)
 
             # Non-target mask
             non_target_mask = 1.0 - target_mask
@@ -49,8 +47,3 @@ class PurityLoss(keras.losses.Loss):
             loss += tf.reduce_mean(proto_sim * non_target_mask)
 
         return loss / self.n_prototypes
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({'n_prototypes': self.n_prototypes})
-        return config

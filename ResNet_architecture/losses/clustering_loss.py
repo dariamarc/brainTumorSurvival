@@ -1,8 +1,7 @@
 import tensorflow as tf
-from tensorflow import keras
 
 
-class ClusteringLoss(keras.losses.Loss):
+class ClusteringLoss:
     """
     Clustering Loss.
 
@@ -13,26 +12,23 @@ class ClusteringLoss(keras.losses.Loss):
     Used in Phase 2 for feature-prototype coherence.
     """
 
-    def __init__(self, n_prototypes=3, n_classes=4, **kwargs):
-        super(ClusteringLoss, self).__init__(**kwargs)
+    def __init__(self, n_prototypes=3, n_classes=4):
         self.n_prototypes = n_prototypes
         self.n_classes = n_classes
         self.epsilon = 1e-6
 
-    def call(self, inputs, prototypes):
+    def __call__(self, features, masks, prototypes):
         """
         Compute Clustering loss.
 
         Args:
-            inputs: tuple of (features, masks)
-                - features: (B, D, H, W, C) feature maps from ASPP
-                - masks: (B, D, H, W, n_classes) one-hot masks
+            features: (B, D, H, W, C) feature maps from ASPP
+            masks: (B, D, H, W, n_classes) one-hot masks
             prototypes: (n_prototypes, C, 1, 1, 1) prototype vectors
 
         Returns:
             Clustering loss scalar
         """
-        features, masks = inputs
 
         loss = 0.0
         count = 0
@@ -72,11 +68,3 @@ class ClusteringLoss(keras.losses.Loss):
             loss = loss / tf.cast(count, tf.float32)
 
         return loss
-
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            'n_prototypes': self.n_prototypes,
-            'n_classes': self.n_classes
-        })
-        return config

@@ -180,8 +180,8 @@ class PrototypeTrainer:
 
         seg_loss = self._compute_segmentation_loss(y_true, y_pred)
         purity = self.purity_loss(y_true, similarities)
-        diversity = self.diversity_loss(None, prototypes)
-        min_act = self.min_activation_loss(None, similarities)
+        diversity = self.diversity_loss(prototypes)
+        min_act = self.min_activation_loss(similarities)
 
         total_loss = (
             1.0 * seg_loss +
@@ -215,9 +215,9 @@ class PrototypeTrainer:
 
         # Downsample masks for clustering loss (features are at 1/8 resolution)
         masks_downsampled = self._downsample_masks(y_true, features.shape[1:4])
-        clustering = self.clustering_loss((features, masks_downsampled), prototypes)
+        clustering = self.clustering_loss(features, masks_downsampled, prototypes)
 
-        separation = self.separation_loss(None, prototypes)
+        separation = self.separation_loss(prototypes)
 
         total_loss = (
             1.0 * seg_loss +
