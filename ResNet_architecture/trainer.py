@@ -616,11 +616,26 @@ class PrototypeTrainer:
         self.model.load_weights(path)
         print(f"Checkpoint loaded: {path}")
 
+    def _convert_to_serializable(self, obj):
+        """Recursively convert numpy types to Python types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_serializable(v) for v in obj]
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+
     def _save_history(self):
         """Save training history."""
         path = os.path.join(self.log_dir, 'training_history.json')
+        serializable_history = self._convert_to_serializable(self.history)
         with open(path, 'w') as f:
-            json.dump(self.history, f, indent=2)
+            json.dump(serializable_history, f, indent=2)
         print(f"History saved: {path}")
 
     def resume_from_phase(self, phase, checkpoint_name=None):
