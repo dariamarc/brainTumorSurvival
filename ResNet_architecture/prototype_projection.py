@@ -231,6 +231,20 @@ class PrototypeProjector:
         self.model.set_prototypes(tf.constant(projected, dtype=tf.float32))
         print("Projected prototypes applied to model.")
 
+    def _convert_to_serializable(self, obj):
+        """Recursively convert numpy types to Python types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {k: self._convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_to_serializable(v) for v in obj]
+        elif isinstance(obj, (np.floating, np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.integer, np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return obj
+
     def save_projection(self, projection_info, save_path):
         """
         Save projection info to disk.
@@ -243,14 +257,15 @@ class PrototypeProjector:
         np.save(f"{save_path}_prototypes.npy", projection_info['projected_prototypes'])
         np.save(f"{save_path}_original_prototypes.npy", projection_info['original_prototypes'])
 
-        # Save metadata as JSON-compatible dict
+        # Save metadata as JSON-compatible dict (convert numpy types)
         import json
         metadata = {
             'projection_metadata': projection_info['projection_metadata'],
             'distances': projection_info['distances']
         }
+        serializable_metadata = self._convert_to_serializable(metadata)
         with open(f"{save_path}_metadata.json", 'w') as f:
-            json.dump(metadata, f, indent=2)
+            json.dump(serializable_metadata, f, indent=2)
 
         print(f"Projection saved to {save_path}_*.npy/json")
 
