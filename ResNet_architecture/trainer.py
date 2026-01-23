@@ -16,6 +16,7 @@ from losses import (
     ActivationConsistencyLoss
 )
 from prototype_projection import PrototypeProjector
+from metrics import SegmentationMetrics, PrototypeMetrics, UtilizationMetrics
 
 
 class PrototypeTrainer:
@@ -41,6 +42,9 @@ class PrototypeTrainer:
         # Initialize loss functions
         self._init_losses()
 
+        # Initialize metrics
+        self._init_metrics()
+
         # Training history
         self.history = {
             'phase1': [], 'phase2': [], 'phase3': []
@@ -62,6 +66,32 @@ class PrototypeTrainer:
             n_prototypes=self.model.n_prototypes,
             n_classes=self.model.num_classes
         )
+
+    def _init_metrics(self):
+        """Initialize metric calculators."""
+        self.seg_metrics = SegmentationMetrics(num_classes=self.model.num_classes)
+        self.proto_metrics = PrototypeMetrics(
+            n_prototypes=self.model.n_prototypes,
+            n_classes=self.model.num_classes
+        )
+        self.util_metrics = UtilizationMetrics(n_prototypes=self.model.n_prototypes)
+
+    def _compute_metrics(self, masks, logits, similarities):
+        """
+        Compute all metrics for given predictions.
+
+        Args:
+            masks: Ground truth masks (B, D, H, W, num_classes)
+            logits: Prediction logits (B, D, H, W, num_classes)
+            similarities: Prototype similarity maps (B, D, H, W, n_prototypes)
+
+        Returns:
+            Dict with all computed metrics
+        """
+        seg = self.seg_metrics.compute_all(masks, logits)
+        proto = self.proto_metrics.compute_all(masks, similarities)
+        util = self.util_metrics.compute_all(similarities)
+        return {**seg, **proto, **util}
 
     # ==================== PHASE SETUP ====================
 
@@ -351,8 +381,9 @@ class PrototypeTrainer:
         return loss_dict
 
     def _validate(self, phase):
-        """Run validation and return metrics."""
+        """Run validation and return losses and metrics."""
         val_losses = []
+        val_metrics = []
 
         for batch_idx in range(len(self.val_generator)):
             images, masks = self.val_generator[batch_idx]
@@ -369,12 +400,26 @@ class PrototypeTrainer:
 
             val_losses.append({k: float(v) for k, v in loss_dict.items()})
 
+            # Compute metrics
+            metrics = self._compute_metrics(masks, logits, similarities)
+            val_metrics.append(metrics)
+
         # Average losses
         avg_losses = {}
         for key in val_losses[0].keys():
             avg_losses[key] = np.mean([l[key] for l in val_losses])
 
-        return avg_losses
+        # Average metrics (handle nested dict for proto_class_activations)
+        avg_metrics = {}
+        for key in val_metrics[0].keys():
+            if key == 'proto_class_activations':
+                # Average the activation matrices
+                matrices = [np.array(m[key]) for m in val_metrics]
+                avg_metrics[key] = np.mean(matrices, axis=0).tolist()
+            else:
+                avg_metrics[key] = np.mean([m[key] for m in val_metrics])
+
+        return avg_losses, avg_metrics
 
     # ==================== PHASE TRAINING ====================
 
@@ -408,7 +453,7 @@ class PrototypeTrainer:
             avg_train_loss = np.mean([l['total'] for l in epoch_losses])
 
             # Validation
-            val_losses = self._validate(phase=1)
+            val_losses, val_metrics = self._validate(phase=1)
             avg_val_loss = val_losses['total']
 
             # Log
@@ -417,11 +462,21 @@ class PrototypeTrainer:
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'train_losses': {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]},
-                'val_losses': val_losses
+                'val_losses': val_losses,
+                'val_metrics': val_metrics
             }
             self.history['phase1'].append(log_entry)
 
+            # Print epoch summary with metrics
             print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
+            print(f"  Dice: ET={val_metrics['dice_gd_enhancing']:.2f}, "
+                  f"ED={val_metrics['dice_edema']:.2f}, "
+                  f"NCR={val_metrics['dice_necrotic']:.2f}, "
+                  f"Mean={val_metrics['dice_mean']:.2f}")
+            print(f"  Purity: P0={val_metrics['purity_proto_0']:.2f}, "
+                  f"P1={val_metrics['purity_proto_1']:.2f}, "
+                  f"P2={val_metrics['purity_proto_2']:.2f}, "
+                  f"Mean={val_metrics['purity_mean']:.2f}")
 
             # Early stopping check
             if avg_val_loss < best_val_loss:
@@ -468,7 +523,7 @@ class PrototypeTrainer:
 
             avg_train_loss = np.mean([l['total'] for l in epoch_losses])
 
-            val_losses = self._validate(phase=2)
+            val_losses, val_metrics = self._validate(phase=2)
             avg_val_loss = val_losses['total']
 
             log_entry = {
@@ -476,11 +531,21 @@ class PrototypeTrainer:
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'train_losses': {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]},
-                'val_losses': val_losses
+                'val_losses': val_losses,
+                'val_metrics': val_metrics
             }
             self.history['phase2'].append(log_entry)
 
+            # Print epoch summary with metrics
             print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
+            print(f"  Dice: ET={val_metrics['dice_gd_enhancing']:.2f}, "
+                  f"ED={val_metrics['dice_edema']:.2f}, "
+                  f"NCR={val_metrics['dice_necrotic']:.2f}, "
+                  f"Mean={val_metrics['dice_mean']:.2f}")
+            print(f"  Purity: P0={val_metrics['purity_proto_0']:.2f}, "
+                  f"P1={val_metrics['purity_proto_1']:.2f}, "
+                  f"P2={val_metrics['purity_proto_2']:.2f}, "
+                  f"Mean={val_metrics['purity_mean']:.2f}")
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
@@ -543,7 +608,7 @@ class PrototypeTrainer:
 
             avg_train_loss = np.mean([l['total'] for l in epoch_losses])
 
-            val_losses = self._validate(phase=3)
+            val_losses, val_metrics = self._validate(phase=3)
             avg_val_loss = val_losses['total']
 
             log_entry = {
@@ -551,11 +616,21 @@ class PrototypeTrainer:
                 'train_loss': avg_train_loss,
                 'val_loss': avg_val_loss,
                 'train_losses': {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]},
-                'val_losses': val_losses
+                'val_losses': val_losses,
+                'val_metrics': val_metrics
             }
             self.history['phase3'].append(log_entry)
 
+            # Print epoch summary with metrics
             print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}")
+            print(f"  Dice: ET={val_metrics['dice_gd_enhancing']:.2f}, "
+                  f"ED={val_metrics['dice_edema']:.2f}, "
+                  f"NCR={val_metrics['dice_necrotic']:.2f}, "
+                  f"Mean={val_metrics['dice_mean']:.2f}")
+            print(f"  Purity: P0={val_metrics['purity_proto_0']:.2f}, "
+                  f"P1={val_metrics['purity_proto_1']:.2f}, "
+                  f"P2={val_metrics['purity_proto_2']:.2f}, "
+                  f"Mean={val_metrics['purity_mean']:.2f}")
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
@@ -663,43 +738,96 @@ class PrototypeTrainer:
 
     def get_full_history(self):
         """
-        Get combined training history from all phases.
+        Get combined training history from all phases for plotting.
 
         Returns:
-            Dictionary with combined metrics across all phases.
+            Dictionary with lists ready for matplotlib plotting:
+            - epochs: [1, 2, 3, ...]
+            - phase_boundaries: [phase1_end, phase2_end] epoch numbers
+            - train_loss, val_loss: loss values per epoch
+            - dice_gd_enhancing, dice_edema, dice_necrotic, dice_mean, dice_whole_tumor
+            - purity_proto_0, purity_proto_1, purity_proto_2, purity_mean
+            - max_act_proto_0/1/2, mean_act_proto_0/1/2, coverage_proto_0/1/2
         """
         combined = {
-            'total_loss': [],
-            'val_total_loss': [],
-            'dice_loss': [],
-            'val_dice_loss': [],
-            'purity_loss': [],
-            'val_purity_loss': [],
-            'mean_iou': [],
-            'val_mean_iou': []
+            'epochs': [],
+            'phase_boundaries': [],
+            'train_loss': [],
+            'val_loss': [],
+            # Segmentation metrics
+            'dice_gd_enhancing': [],
+            'dice_edema': [],
+            'dice_necrotic': [],
+            'dice_mean': [],
+            'dice_whole_tumor': [],
+            # Prototype purity metrics
+            'purity_proto_0': [],
+            'purity_proto_1': [],
+            'purity_proto_2': [],
+            'purity_mean': [],
+            # Utilization metrics
+            'max_act_proto_0': [],
+            'max_act_proto_1': [],
+            'max_act_proto_2': [],
+            'mean_act_proto_0': [],
+            'mean_act_proto_1': [],
+            'mean_act_proto_2': [],
+            'coverage_proto_0': [],
+            'coverage_proto_1': [],
+            'coverage_proto_2': [],
+            # Loss components
+            'loss_segmentation': [],
+            'loss_purity': [],
         }
 
-        # Process each phase
-        for phase_name in ['phase1', 'phase2', 'phase3']:
-            for entry in self.history.get(phase_name, []):
-                # Training losses
-                combined['total_loss'].append(entry.get('train_loss', 0))
-                if 'train_losses' in entry:
-                    combined['dice_loss'].append(
-                        entry['train_losses'].get('segmentation', 0)
-                    )
-                    combined['purity_loss'].append(
-                        entry['train_losses'].get('purity', 0)
-                    )
+        epoch_counter = 0
 
-                # Validation losses
-                combined['val_total_loss'].append(entry.get('val_loss', 0))
+        # Process each phase
+        for phase_idx, phase_name in enumerate(['phase1', 'phase2', 'phase3']):
+            phase_entries = self.history.get(phase_name, [])
+
+            for entry in phase_entries:
+                epoch_counter += 1
+                combined['epochs'].append(epoch_counter)
+                combined['train_loss'].append(entry.get('train_loss', 0))
+                combined['val_loss'].append(entry.get('val_loss', 0))
+
+                # Loss components
                 if 'val_losses' in entry:
-                    combined['val_dice_loss'].append(
+                    combined['loss_segmentation'].append(
                         entry['val_losses'].get('segmentation', 0)
                     )
-                    combined['val_purity_loss'].append(
+                    combined['loss_purity'].append(
                         entry['val_losses'].get('purity', 0)
                     )
+
+                # Metrics (from val_metrics)
+                if 'val_metrics' in entry:
+                    metrics = entry['val_metrics']
+                    # Segmentation
+                    combined['dice_gd_enhancing'].append(metrics.get('dice_gd_enhancing', 0))
+                    combined['dice_edema'].append(metrics.get('dice_edema', 0))
+                    combined['dice_necrotic'].append(metrics.get('dice_necrotic', 0))
+                    combined['dice_mean'].append(metrics.get('dice_mean', 0))
+                    combined['dice_whole_tumor'].append(metrics.get('dice_whole_tumor', 0))
+                    # Purity
+                    combined['purity_proto_0'].append(metrics.get('purity_proto_0', 0))
+                    combined['purity_proto_1'].append(metrics.get('purity_proto_1', 0))
+                    combined['purity_proto_2'].append(metrics.get('purity_proto_2', 0))
+                    combined['purity_mean'].append(metrics.get('purity_mean', 0))
+                    # Utilization
+                    combined['max_act_proto_0'].append(metrics.get('max_act_proto_0', 0))
+                    combined['max_act_proto_1'].append(metrics.get('max_act_proto_1', 0))
+                    combined['max_act_proto_2'].append(metrics.get('max_act_proto_2', 0))
+                    combined['mean_act_proto_0'].append(metrics.get('mean_act_proto_0', 0))
+                    combined['mean_act_proto_1'].append(metrics.get('mean_act_proto_1', 0))
+                    combined['mean_act_proto_2'].append(metrics.get('mean_act_proto_2', 0))
+                    combined['coverage_proto_0'].append(metrics.get('coverage_proto_0', 0))
+                    combined['coverage_proto_1'].append(metrics.get('coverage_proto_1', 0))
+                    combined['coverage_proto_2'].append(metrics.get('coverage_proto_2', 0))
+
+            # Record phase boundary
+            if phase_entries and phase_idx < 2:  # Don't add boundary after last phase
+                combined['phase_boundaries'].append(epoch_counter)
 
         return combined
