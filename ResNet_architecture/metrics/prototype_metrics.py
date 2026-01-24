@@ -62,20 +62,23 @@ class PrototypeMetrics:
 
             # Compute mean activation on target class region
             target_voxels = tf.reduce_sum(target_mask)
-            if target_voxels > 0:
-                target_activation = tf.reduce_sum(proto_sim * target_mask) / (target_voxels + self.epsilon)
-            else:
-                target_activation = tf.constant(0.0)
+            target_activation = tf.where(
+                target_voxels > 0,
+                tf.reduce_sum(proto_sim * target_mask) / (target_voxels + self.epsilon),
+                0.0
+            )
 
             # Compute mean activation on other tumor class regions
             other_voxels = tf.reduce_sum(other_tumor_mask)
-            if other_voxels > 0:
-                other_activation = tf.reduce_sum(proto_sim * other_tumor_mask) / (other_voxels + self.epsilon)
-            else:
-                other_activation = tf.constant(self.epsilon)
+            other_activation = tf.where(
+                other_voxels > 0,
+                tf.reduce_sum(proto_sim * other_tumor_mask) / (other_voxels + self.epsilon),
+                self.epsilon
+            )
 
-            # Purity ratio
-            ratio = float((target_activation / (other_activation + self.epsilon)).numpy())
+            # Purity ratio (with NaN protection)
+            ratio_tensor = target_activation / (other_activation + self.epsilon)
+            ratio = float(tf.where(tf.math.is_nan(ratio_tensor), 0.0, ratio_tensor).numpy())
             purity[f'purity_proto_{proto_idx}'] = ratio
 
         # Mean purity

@@ -326,6 +326,10 @@ class PrototypeTrainer:
         # Get trainable variables (excludes frozen backbone)
         trainable_vars = self.model.trainable_variables
         gradients = tape.gradient(loss, trainable_vars)
+
+        # Clip gradients to prevent exploding gradients
+        gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
 
         return loss_dict
@@ -351,6 +355,10 @@ class PrototypeTrainer:
 
         del tape
 
+        # Clip gradients to prevent exploding gradients
+        backbone_grads, _ = tf.clip_by_global_norm(backbone_grads, 1.0)
+        other_grads, _ = tf.clip_by_global_norm(other_grads, 1.0)
+
         self.optimizer_backbone.apply_gradients(zip(backbone_grads, backbone_vars))
         self.optimizer_other.apply_gradients(zip(other_grads, other_vars))
 
@@ -374,6 +382,10 @@ class PrototypeTrainer:
         other_grads = tape.gradient(loss, other_vars)
 
         del tape
+
+        # Clip gradients to prevent exploding gradients
+        backbone_grads, _ = tf.clip_by_global_norm(backbone_grads, 1.0)
+        other_grads, _ = tf.clip_by_global_norm(other_grads, 1.0)
 
         self.optimizer_backbone.apply_gradients(zip(backbone_grads, backbone_vars))
         self.optimizer_other.apply_gradients(zip(other_grads, other_vars))

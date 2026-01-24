@@ -53,7 +53,9 @@ class SegmentationMetrics:
             union = tf.reduce_sum(y_true_class) + tf.reduce_sum(y_pred_class)
 
             dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
-            dice_scores[f'dice_{name}'] = float(dice.numpy())
+            dice_val = float(dice.numpy())
+            # Handle NaN
+            dice_scores[f'dice_{name}'] = 0.0 if np.isnan(dice_val) else dice_val
 
         return dice_scores
 

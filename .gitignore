@@ -8,3 +8,4 @@ __pycache__/
 .DS_Store
 training.log
 *.pem
+preprocessed_data_cropped.zip
