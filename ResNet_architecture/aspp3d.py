@@ -60,10 +60,13 @@ class ASPP3D(layers.Layer):
         ], name=f'aspp_conv_d{dilation_rates[2]}')
 
         # Branch 5: Global average pooling
+        # Note: Using LayerNormalization instead of BatchNorm because the input
+        # is (B, 1, 1, 1, C) after global pooling - BatchNorm fails with single
+        # spatial values (variance computation over 1 element causes NaN)
         self.global_pool_conv = keras.Sequential([
             layers.Conv3D(out_channels, kernel_size=1, padding='same',
-                          use_bias=False, kernel_initializer='he_normal'),
-            layers.BatchNormalization(),
+                          use_bias=True, kernel_initializer='he_normal'),
+            layers.LayerNormalization(),
             layers.ReLU()
         ], name='aspp_global_pool')
 
