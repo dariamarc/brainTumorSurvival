@@ -10,11 +10,7 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from losses import (
-    DiceLoss, FocalLoss, PurityLoss, DiversityLoss,
-    MinActivationLoss, ClusteringLoss, SeparationLoss,
-    ActivationConsistencyLoss
-)
+from losses import DiceLoss
 from prototype_projection import PrototypeProjector
 from metrics import SegmentationMetrics, PrototypeMetrics, UtilizationMetrics
 
@@ -52,19 +48,10 @@ class PrototypeTrainer:
 
     def _init_losses(self):
         """Initialize all loss functions."""
-        self.dice_loss = DiceLoss()
-        self.focal_loss = FocalLoss(gamma=2.0, alpha=0.25)
-        self.purity_loss = PurityLoss(n_prototypes=self.model.n_prototypes)
-        self.diversity_loss = DiversityLoss(n_prototypes=self.model.n_prototypes)
-        self.min_activation_loss = MinActivationLoss(n_prototypes=self.model.n_prototypes)
-        self.clustering_loss = ClusteringLoss(
-            n_prototypes=self.model.n_prototypes,
-            n_classes=self.model.num_classes
-        )
-        self.separation_loss = SeparationLoss(n_prototypes=self.model.n_prototypes)
-        self.activation_consistency_loss = ActivationConsistencyLoss(
-            n_prototypes=self.model.n_prototypes,
-            n_classes=self.model.num_classes
+        # Weighted Dice: 0 for background, 1 for tumor classes
+        self.dice_loss = DiceLoss(
+            class_weights=[0.0, 1.0, 1.0, 1.0],
+            num_classes=self.model.num_classes
         )
 
     def _init_metrics(self):
@@ -192,83 +179,47 @@ class PrototypeTrainer:
 
     # ==================== LOSS COMPUTATION ====================
 
-    def _compute_segmentation_loss(self, y_true, y_pred):
-        """Dice + Focal loss."""
-        dice = self.dice_loss(y_true, y_pred)
-        focal = self.focal_loss(y_true, y_pred)
-        return dice + focal
-
     def _compute_phase1_loss(self, y_true, y_pred, similarities):
         """
-        Phase 1 losses:
-        - Segmentation: 1.0
-        - Diversity: 0.5
+        Phase 1 loss: Weighted Dice only.
+        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
         """
-        prototypes = self.model.get_prototypes()
-
-        seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        diversity = self.diversity_loss(prototypes)
-
-        total_loss = (
-            1.0 * seg_loss +
-            0.5 * diversity
-        )
+        dice_loss = self.dice_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': total_loss,
-            'segmentation': seg_loss,
-            'diversity': diversity
+            'total': dice_loss,
+            'dice': dice_loss
         }
 
-        return total_loss, loss_dict
+        return dice_loss, loss_dict
 
     def _compute_phase2_loss(self, y_true, y_pred, similarities, features):
         """
-        Phase 2 losses:
-        - Segmentation: 1.0
-        - Diversity: 0.5
+        Phase 2 loss: Weighted Dice only.
+        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
         """
-        prototypes = self.model.get_prototypes()
-
-        seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        diversity = self.diversity_loss(prototypes)
-
-        total_loss = (
-            1.0 * seg_loss +
-            0.5 * diversity
-        )
+        dice_loss = self.dice_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': total_loss,
-            'segmentation': seg_loss,
-            'diversity': diversity
+            'total': dice_loss,
+            'dice': dice_loss
         }
 
-        return total_loss, loss_dict
+        return dice_loss, loss_dict
 
     def _compute_phase3_loss(self, y_true, y_pred, similarities):
         """
-        Phase 3 losses:
-        - Segmentation: 1.0
-        - Diversity: 0.5
+        Phase 3 loss: Weighted Dice only.
+        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
         """
-        prototypes = self.model.get_prototypes()
-
-        seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        diversity = self.diversity_loss(prototypes)
-
-        total_loss = (
-            1.0 * seg_loss +
-            0.5 * diversity
-        )
+        dice_loss = self.dice_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': total_loss,
-            'segmentation': seg_loss,
-            'diversity': diversity
+            'total': dice_loss,
+            'dice': dice_loss
         }
 
-        return total_loss, loss_dict
+        return dice_loss, loss_dict
 
     def _downsample_masks(self, masks, target_shape):
         """Downsample masks to match feature resolution."""
