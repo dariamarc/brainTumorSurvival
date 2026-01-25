@@ -202,30 +202,22 @@ class PrototypeTrainer:
         """
         Phase 1 losses:
         - Segmentation: 1.0
-        - Purity: 2.0
         - Diversity: 0.5
-        - MinActivation: 0.1
         """
         prototypes = self.model.get_prototypes()
 
         seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        purity = self.purity_loss(y_true, similarities)
         diversity = self.diversity_loss(prototypes)
-        min_act = self.min_activation_loss(similarities)
 
         total_loss = (
             1.0 * seg_loss +
-            2.0 * purity +
-            0.5 * diversity +
-            0.1 * min_act
+            0.5 * diversity
         )
 
         loss_dict = {
             'total': total_loss,
             'segmentation': seg_loss,
-            'purity': purity,
-            'diversity': diversity,
-            'min_activation': min_act
+            'diversity': diversity
         }
 
         return total_loss, loss_dict
@@ -234,34 +226,22 @@ class PrototypeTrainer:
         """
         Phase 2 losses:
         - Segmentation: 1.0
-        - Purity: 1.0
-        - Clustering: 1.0
-        - Separation: 0.3
+        - Diversity: 0.5
         """
         prototypes = self.model.get_prototypes()
 
         seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        purity = self.purity_loss(y_true, similarities)
-
-        # Downsample masks for clustering loss (features are at 1/8 resolution)
-        masks_downsampled = self._downsample_masks(y_true, features.shape[1:4])
-        clustering = self.clustering_loss(features, masks_downsampled, prototypes)
-
-        separation = self.separation_loss(prototypes)
+        diversity = self.diversity_loss(prototypes)
 
         total_loss = (
             1.0 * seg_loss +
-            1.0 * purity +
-            1.0 * clustering +
-            0.3 * separation
+            0.5 * diversity
         )
 
         loss_dict = {
             'total': total_loss,
             'segmentation': seg_loss,
-            'purity': purity,
-            'clustering': clustering,
-            'separation': separation
+            'diversity': diversity
         }
 
         return total_loss, loss_dict
@@ -270,24 +250,22 @@ class PrototypeTrainer:
         """
         Phase 3 losses:
         - Segmentation: 1.0
-        - Purity: 0.5
-        - ActivationConsistency: 0.3
+        - Diversity: 0.5
         """
+        prototypes = self.model.get_prototypes()
+
         seg_loss = self._compute_segmentation_loss(y_true, y_pred)
-        purity = self.purity_loss(y_true, similarities)
-        consistency = self.activation_consistency_loss(y_true, similarities)
+        diversity = self.diversity_loss(prototypes)
 
         total_loss = (
             1.0 * seg_loss +
-            0.5 * purity +
-            0.3 * consistency
+            0.5 * diversity
         )
 
         loss_dict = {
             'total': total_loss,
             'segmentation': seg_loss,
-            'purity': purity,
-            'activation_consistency': consistency
+            'diversity': diversity
         }
 
         return total_loss, loss_dict
