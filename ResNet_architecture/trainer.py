@@ -10,7 +10,7 @@ from datetime import datetime
 # Add parent directory to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from losses import DiceLoss
+from losses.hybrid_loss import HybridSegmentationLoss
 from prototype_projection import PrototypeProjector
 from metrics import SegmentationMetrics, PrototypeMetrics, UtilizationMetrics
 
@@ -48,10 +48,12 @@ class PrototypeTrainer:
 
     def _init_losses(self):
         """Initialize all loss functions."""
-        # Weighted Dice: 0 for background, 1 for tumor classes
-        self.dice_loss = DiceLoss(
-            class_weights=[0.0, 1.0, 1.0, 1.0],
-            num_classes=self.model.num_classes
+        # Hybrid loss: wCross + α×mDSC (α=100 by default)
+        # - wCross: Volume Size Weighted Cross Entropy (preserves boundary details)
+        # - mDSC: Multi-class Dice Similarity Coefficient (compact segmentation)
+        self.hybrid_loss = HybridSegmentationLoss(
+            alpha_mdsc=100.0,
+            n_classes=self.model.num_classes
         )
 
     def _init_metrics(self):
@@ -181,45 +183,60 @@ class PrototypeTrainer:
 
     def _compute_phase1_loss(self, y_true, y_pred, similarities):
         """
-        Phase 1 loss: Weighted Dice only.
-        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
+        Phase 1 loss: Hybrid segmentation loss (wCross + α×mDSC).
+
+        L_hybrid = L_wCross + α × L_mDSC (α=100)
+        - wCross: Volume Size Weighted Cross Entropy (boundary details)
+        - mDSC: Multi-class Dice Similarity Coefficient (compact segmentation)
         """
-        dice_loss = self.dice_loss(y_true, y_pred)
+        seg_loss = self.hybrid_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': dice_loss,
-            'dice': dice_loss
+            'total': seg_loss,
+            'segmentation': seg_loss,
+            'wcross': self.hybrid_loss.weighted_cross_entropy_loss(y_true, y_pred),
+            'mdsc': self.hybrid_loss.multiclass_dice_loss(y_true, y_pred)
         }
 
-        return dice_loss, loss_dict
+        return seg_loss, loss_dict
 
     def _compute_phase2_loss(self, y_true, y_pred, similarities, features):
         """
-        Phase 2 loss: Weighted Dice only.
-        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
+        Phase 2 loss: Hybrid segmentation loss (wCross + α×mDSC).
+
+        L_hybrid = L_wCross + α × L_mDSC (α=100)
+        - wCross: Volume Size Weighted Cross Entropy (boundary details)
+        - mDSC: Multi-class Dice Similarity Coefficient (compact segmentation)
         """
-        dice_loss = self.dice_loss(y_true, y_pred)
+        seg_loss = self.hybrid_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': dice_loss,
-            'dice': dice_loss
+            'total': seg_loss,
+            'segmentation': seg_loss,
+            'wcross': self.hybrid_loss.weighted_cross_entropy_loss(y_true, y_pred),
+            'mdsc': self.hybrid_loss.multiclass_dice_loss(y_true, y_pred)
         }
 
-        return dice_loss, loss_dict
+        return seg_loss, loss_dict
 
     def _compute_phase3_loss(self, y_true, y_pred, similarities):
         """
-        Phase 3 loss: Weighted Dice only.
-        Weights: [0, 1, 1, 1] - ignores background, focuses on tumor classes.
+        Phase 3 loss: Hybrid segmentation loss (wCross + α×mDSC).
+
+        L_hybrid = L_wCross + α × L_mDSC (α=100)
+        - wCross: Volume Size Weighted Cross Entropy (boundary details)
+        - mDSC: Multi-class Dice Similarity Coefficient (compact segmentation)
         """
-        dice_loss = self.dice_loss(y_true, y_pred)
+        seg_loss = self.hybrid_loss(y_true, y_pred)
 
         loss_dict = {
-            'total': dice_loss,
-            'dice': dice_loss
+            'total': seg_loss,
+            'segmentation': seg_loss,
+            'wcross': self.hybrid_loss.weighted_cross_entropy_loss(y_true, y_pred),
+            'mdsc': self.hybrid_loss.multiclass_dice_loss(y_true, y_pred)
         }
 
-        return dice_loss, loss_dict
+        return seg_loss, loss_dict
 
     def _downsample_masks(self, masks, target_shape):
         """Downsample masks to match feature resolution."""
@@ -716,9 +733,10 @@ class PrototypeTrainer:
             'coverage_proto_0': [],
             'coverage_proto_1': [],
             'coverage_proto_2': [],
-            # Loss components
+            # Loss components (hybrid loss)
             'loss_segmentation': [],
-            'loss_purity': [],
+            'loss_wcross': [],
+            'loss_mdsc': [],
         }
 
         epoch_counter = 0
@@ -733,13 +751,16 @@ class PrototypeTrainer:
                 combined['train_loss'].append(entry.get('train_loss', 0))
                 combined['val_loss'].append(entry.get('val_loss', 0))
 
-                # Loss components
+                # Loss components (hybrid loss)
                 if 'val_losses' in entry:
                     combined['loss_segmentation'].append(
                         entry['val_losses'].get('segmentation', 0)
                     )
-                    combined['loss_purity'].append(
-                        entry['val_losses'].get('purity', 0)
+                    combined['loss_wcross'].append(
+                        entry['val_losses'].get('wcross', 0)
+                    )
+                    combined['loss_mdsc'].append(
+                        entry['val_losses'].get('mdsc', 0)
                     )
 
                 # Metrics (from val_metrics)
